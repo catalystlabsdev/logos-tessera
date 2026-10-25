@@ -13,3 +13,9 @@ tessera_core = { path = "../../core", features = ["std", "fixtures"] }
 risc0-zkvm.workspace = true
 borsh.workspace = true
 anyhow.workspace = true
+
+[features]
+default = []
+# In-process proving with LEZ; add `cuda` on an NVIDIA machine.
+prove = ["lee/prove", "risc0-zkvm/prove"]
+cuda = ["prove", "risc0-zkvm/cuda"]
