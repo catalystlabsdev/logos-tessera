@@ -1,0 +1,31 @@
+first build: + echo BUILD_EXIT=0
+BUILD_EXIT=0
+91c1c9b Private posture: QueueAndExecute inside LEZ's privacy circuit
+   Compiling tessera_api v0.1.0 (<home>/logos-tessera/program/api)
+   Compiling tessera_methods v0.1.0 (<home>/logos-tessera/program/methods)
+   Compiling tessera_host v0.1.0 (<home>/logos-tessera/program/host)
+    Finished `release` profile [optimized + debuginfo] target(s) in 5.65s
+
+real	0m5.717s
+user	0m23.059s
+sys	0m3.380s
+=== GPU
+NVIDIA L4, 580.178.04, 23034 MiB
+=== custody check (real proving path)
+ok  group_key_holder_cannot_debit_private_vault: refused (InvalidProgramBehavior(NativeTransferFailed(UnauthorizedSender { account_id: 8EFDNTyNLEbjioUUV9Dh2838aA2Pqp7bvdx898QGRhfY })))
+=== private M=5
+RESULT private QueueAndExecute M=5 prove_wall_s=19.8 proof_bytes=226845 private_actions=2
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:19.94
+	Maximum resident set size (kbytes): 660736
+gpu util max: 100 %, 8072 MiB
+=== private M=1
+RESULT private QueueAndExecute M=1 prove_wall_s=14.5 proof_bytes=226717 private_actions=2
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:14.59
+	Maximum resident set size (kbytes): 644852
+gpu util max: 100 %, 11324 MiB
+=== private M=10
+RESULT private QueueAndExecute M=10 prove_wall_s=25.8 proof_bytes=227116 private_actions=2
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:25.95
+	Maximum resident set size (kbytes): 658880
+gpu util max: 97 %, 11140 MiB
+ALL_DONE

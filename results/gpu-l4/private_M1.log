@@ -1,0 +1,26 @@
+tessera image id: e9aa4b2402faa8ce527a6f6565bc81d1e6f8469f27e8918fab3361ef22dcee69
+M = 1, N = 7, signatures checked = 3, RISC0_DEV_MODE="0"
+RESULT private QueueAndExecute M=1 prove_wall_s=14.5 proof_bytes=226717 private_actions=2
+	Command being timed: "./target/release/private 1"
+	User time (seconds): 12.85
+	System time (seconds): 1.74
+	Percent of CPU this job got: 100%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:14.59
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 644852
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 45
+	Minor (reclaiming a frame) page faults: 521809
+	Voluntary context switches: 231
+	Involuntary context switches: 83
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 2040
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
