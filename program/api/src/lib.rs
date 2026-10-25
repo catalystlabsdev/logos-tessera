@@ -16,13 +16,16 @@ pub struct State {
     pub ctx: Context,
     pub config: Config,
     pub vault_seed: [u8; 32],
+    /// The vault's address: `for_public_pda` in the public posture, `for_private_pda` (bound to
+    /// the group's keys) in the private posture. Tessera lends authority only over this account.
+    pub vault_id: [u8; 32],
     pub queued: Vec<Queued>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Msg {
     /// Write a new, not-yet-active configuration. The actor must be empty.
-    Create { ctx: Context, config: Config, vault_seed: [u8; 32] },
+    Create { ctx: Context, config: Config, vault_seed: [u8; 32], vault_id: [u8; 32], private: bool },
     /// Members confirm the configuration they are bound by.
     Activate { approvals: Vec<Approval> },
     /// Verify a quorum and record the action; it becomes executable after the time lock.

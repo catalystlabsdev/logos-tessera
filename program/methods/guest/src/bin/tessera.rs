@@ -30,7 +30,7 @@ fn windowed(resp: Response, env: &TxEnv) -> Response {
         .unwrap_or_else(|_| fail(core::Error::WindowInvalid))
 }
 
-fn perform(mut state: State, executed: Executed, env: &TxEnv, program: AccountId) -> Response {
+fn perform(mut state: State, executed: Executed, env: &TxEnv) -> Response {
     let Executed { queued, effect } = executed;
     match state.queued.iter_mut().find(|q| q.digest == queued.digest) {
         Some(slot) => *slot = queued,
@@ -40,7 +40,7 @@ fn perform(mut state: State, executed: Executed, env: &TxEnv, program: AccountId
     match effect {
         Effect::Calls(calls) => {
             let vault_seed = PdaSeed::new(state.vault_seed);
-            let vault = AccountId::for_public_pda(&program, &vault_seed);
+            let vault = AccountId::new(state.vault_id);
             for call in calls {
                 let target = call.accounts.first().unwrap_or_else(|| fail(core::Error::CallNotAllowed));
                 // Tessera can only lend authority over its own vault.
@@ -77,14 +77,18 @@ fn perform(mut state: State, executed: Executed, env: &TxEnv, program: AccountId
 fn handle_message(input: &ReceiveInput, msg: Msg) -> Response {
     let program = input.receiver.program_account_id;
     match msg {
-        Msg::Create { ctx, config, vault_seed } => {
+        Msg::Create { ctx, config, vault_seed, vault_id, private } => {
             assert!(input.pre_state.is_empty(), "tessera: multisig already exists");
-            let expected = AccountId::for_public_pda(&program, &PdaSeed::new(config.multisig_id));
-            assert!(input.receiver.account_id == expected, "tessera: wrong configuration account");
+            // Public posture: the configuration lives at the public PDA. Private posture: the
+            // privacy circuit has already bound the private PDA to (program, multisig_id).
+            if !private {
+                let expected = AccountId::for_public_pda(&program, &PdaSeed::new(config.multisig_id));
+                assert!(input.receiver.account_id == expected, "tessera: wrong configuration account");
+            }
             assert!(ctx.program_id == *program.value(), "tessera: context names another program");
             core::validate_config(&config).unwrap_or_else(|e| fail(e));
             let config = core::Config { initialised: false, ..config };
-            Response::set_state(store(&State { ctx, config, vault_seed, queued: Vec::new() }))
+            Response::set_state(store(&State { ctx, config, vault_seed, vault_id, queued: Vec::new() }))
         }
         Msg::Activate { approvals } => {
             let mut state = load(input);
@@ -115,7 +119,7 @@ fn handle_message(input: &ReceiveInput, msg: Msg) -> Response {
                 .unwrap_or_else(|| fail(core::Error::NotQueued));
             let executed = core::execute(&state.ctx, &state.config, &queued, &proposal, &executor, &env)
                 .unwrap_or_else(|e| fail(e));
-            perform(state, executed, &env, program)
+            perform(state, executed, &env)
         }
         Msg::QueueAndExecute { proposal, signed_epoch, proposer, approvals, executor, env } => {
             let state = load(input);
@@ -134,7 +138,7 @@ fn handle_message(input: &ReceiveInput, msg: Msg) -> Response {
                 !state.queued.iter().any(|q| q.digest == executed.queued.digest),
                 "tessera: already executed"
             );
-            perform(state, executed, &env, program)
+            perform(state, executed, &env)
         }
     }
 }

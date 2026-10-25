@@ -65,7 +65,7 @@ impl World {
         };
         let proposal = Proposal { proposal_id: 1, expires_at_ms: 1_000_000_000, action: Action::Calls(vec![call]) };
         f.resign(proposal, m);
-        let stored = State { ctx: f.ctx.clone(), config: f.config.clone(), vault_seed, queued: Vec::new() };
+        let stored = State { ctx: f.ctx.clone(), config: f.config.clone(), vault_seed, vault_id: *vault.value(), queued: Vec::new() };
         let config_account =
             Account::default().with_actor_state(program_acct, ActorState::from(borsh::to_vec(&stored)?));
         let state = V03State::new()
