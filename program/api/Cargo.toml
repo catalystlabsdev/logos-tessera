@@ -1,0 +1,10 @@
+[package]
+name = "tessera_api"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Messages and stored state of the Tessera LEZ program"
+
+[dependencies]
+tessera_core = { path = "../../core" }
+borsh = { version = "1.5.7", default-features = false, features = ["derive"] }

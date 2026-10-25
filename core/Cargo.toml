@@ -1,0 +1,27 @@
+[package]
+name = "tessera_core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Runtime-agnostic authorisation rules for the Tessera M-of-N multisig (LEZ / RISC Zero guest)"
+publish = false
+
+[features]
+default = []
+# Enables std in dependencies; used by tests.
+std = ["borsh/std", "sha2/std", "k256/std"]
+# Deterministic signing keys and ready-made inputs for tests and guest benchmarks.
+fixtures = []
+
+[dependencies]
+borsh = { version = "1.5.7", default-features = false, features = ["derive"] }
+sha2 = { version = "0.10", default-features = false }
+k256 = { version = "=0.13.4", default-features = false, features = ["schnorr"] }
+
+[dev-dependencies]
+# Self dev-dependency so integration tests always see the fixtures module.
+tessera_core = { path = ".", features = ["fixtures", "std"] }
+
+[[example]]
+name = "fixture"
+required-features = ["fixtures"]

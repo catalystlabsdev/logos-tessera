@@ -1,0 +1,15 @@
+[package]
+name = "tessera_host"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+lee.workspace = true
+lee_core = { workspace = true, features = ["host"] }
+tessera_methods = { path = "../methods" }
+tessera_api = { path = "../api" }
+tessera_core = { path = "../../core", features = ["std", "fixtures"] }
+risc0-zkvm.workspace = true
+borsh.workspace = true
+anyhow.workspace = true

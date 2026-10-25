@@ -1,0 +1,19 @@
+[workspace]
+resolver = "2"
+members = ["api", "methods", "host"]
+exclude = ["methods/guest"]
+
+[workspace.package]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+lee = { git = "https://github.com/logos-blockchain/logos-execution-zone", rev = "7e3f7f76" }
+lee_core = { git = "https://github.com/logos-blockchain/logos-execution-zone", rev = "7e3f7f76" }
+risc0-zkvm = { version = "3.0.5", default-features = false, features = ["std"] }
+risc0-build = "3.0.5"
+borsh = "1.5.7"
+anyhow = "1"
+
+[profile.release]
+debug = 1
