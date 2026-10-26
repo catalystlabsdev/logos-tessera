@@ -2,6 +2,7 @@
 //! circuit. The configuration and the vault are private PDAs of Tessera, bound to the group's
 //! keys; the payout goes to a public recipient. Prints proving time and proof size.
 //!
+//! `--padded` adds the wallet's 7-slot and 512-byte note padding.
 //! RISC0_DEV_MODE=1 checks the composition quickly; RISC0_DEV_MODE=0 with `--features cuda`
 //! (or `prove`) is the real measurement.
 use std::{
@@ -15,10 +16,11 @@ use lee::{
     execute_and_prove, privacy_preserving_transaction::circuit::ProgramCatalog,
 };
 use lee_core::{
-    AuthorizationSecretKey, NullifierPublicKey, NullifierSecretKey, NullifierWitness,
-    PrivateWitness, RecipientEncryption, RootCall, WitnessKind,
+    AuthorizationSecretKey, DUMMY_COMMITMENT_HASH, DummyInput, DummyOutput, EncryptedNote,
+    NullifierPublicKey, NullifierSecretKey, NullifierWitness, PrivateWitness, RecipientEncryption,
+    RootCall, SharedSecretKey, WitnessKind,
     account::{Account, AccountId, Actor, ActorState},
-    encryption::ViewingPublicKey,
+    encryption::{Ciphertext, MlKem768EncapsulationKey, ViewingPublicKey},
     execution_state::TransactionEntry,
     native_token::{self, NATIVE_TOKEN_PROGRAM_ID},
     program::{MessageBody, PdaSeed},
@@ -40,8 +42,36 @@ fn no_seal(body: &MessageBody) -> Result<RecipientEncryption, LeeError> {
     Err(LeeError::InvalidInput(format!("no seal for async message to {:?}", body.to)))
 }
 
+/// A wallet pads every private transaction to 7 private actions and 512-byte notes, so that
+/// observers cannot count real accounts. Mirrors LEZ's own `cycle_bench` dummies.
+const PADDED_ACTIONS: usize = 7;
+const CIPHERTEXT_PAD: u32 = 512;
+
+fn dummy_inputs(count: usize, seed: u8) -> Vec<DummyInput> {
+    (0..count)
+        .map(|i| {
+            let tag = |k: u8| sha(&[b"tessera/dummy", &[seed, i as u8, k]]);
+            let ek = MlKem768EncapsulationKey::from_seed(&tag(1), &tag(2));
+            let (_, epk) = SharedSecretKey::encapsulate(&ek);
+            let mut ciphertext = vec![0u8; CIPHERTEXT_PAD as usize];
+            for (j, b) in ciphertext.iter_mut().enumerate() {
+                *b = tag(3)[j % 32] ^ (j as u8);
+            }
+            DummyInput {
+                nullifier_seed: tag(4),
+                commitment_root: DUMMY_COMMITMENT_HASH,
+                output: DummyOutput {
+                    commitment_seed: tag(5),
+                    note: EncryptedNote { ciphertext: Ciphertext::from_inner(ciphertext), epk },
+                },
+            }
+        })
+        .collect()
+}
+
 fn main() -> Result<()> {
     let m: usize = std::env::args().nth(1).and_then(|a| a.parse().ok()).unwrap_or(5);
+    let padded = std::env::args().any(|a| a == "--padded");
     let n = m.max(7);
     let program = program()?;
     let program_acct = AccountId::from_builtin_program(program.id());
@@ -108,8 +138,8 @@ fn main() -> Result<()> {
         }),
         public_context: PublicExecutionContext::new(vec![Actor::native_balance(recipient)], HashSet::new()),
         private_witnesses: vec![witness(config_account, config_seed), witness(vault_account, vault_seed)],
-        dummy_inputs: Vec::new(),
-        ciphertext_padding: None,
+        dummy_inputs: if padded { dummy_inputs(PADDED_ACTIONS - 2, n as u8) } else { Vec::new() },
+        ciphertext_padding: if padded { Some(CIPHERTEXT_PAD) } else { None },
         recoveries: Vec::new(),
         private_promotions: BTreeSet::new(),
     };
@@ -145,7 +175,10 @@ fn main() -> Result<()> {
     }
 
     let dev = std::env::var("RISC0_DEV_MODE").unwrap_or_default();
-    println!("M = {m}, N = {n}, signatures checked = {}, RISC0_DEV_MODE={dev:?}", m + 2);
+    println!(
+        "M = {m}, N = {n}, signatures checked = {}, padded = {padded}, RISC0_DEV_MODE={dev:?}",
+        m + 2
+    );
     let started = Instant::now();
     let (output, proof) = execute_and_prove(
         input,
@@ -159,7 +192,7 @@ fn main() -> Result<()> {
     let secs = started.elapsed().as_secs_f64();
     let proof_bytes = proof.into_inner().len();
     println!(
-        "RESULT private QueueAndExecute M={m} prove_wall_s={secs:.1} proof_bytes={proof_bytes} private_actions={}",
+        "RESULT private QueueAndExecute M={m} padded={padded} prove_wall_s={secs:.1} proof_bytes={proof_bytes} private_actions={}",
         output.execution.private_actions.len()
     );
     Ok(())

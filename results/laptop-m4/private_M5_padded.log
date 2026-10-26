@@ -1,2 +1,22 @@
 tessera image id: 9f09a0e1956bcdd4ad034a06cc4d83117e4ae389aac9f0ba4777e59fa9b00b1b
 M = 5, N = 7, signatures checked = 7, padded = true, RISC0_DEV_MODE="0"
+RESULT private QueueAndExecute M=5 padded=true prove_wall_s=881.1 proof_bytes=235740 private_actions=7
+      881.12 real      7121.50 user        68.65 sys
+          6770638848  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+             6834758  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                  26  messages sent
+                  96  messages received
+                   0  signals received
+                 889  voluntary context switches
+             8184024  involuntary context switches
+           916878746  instructions retired
+           289224547  cycles elapsed
+             8618344  peak memory footprint
+exit=0

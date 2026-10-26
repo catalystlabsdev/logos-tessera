@@ -65,9 +65,11 @@ use Metal for this circuit, so this is what a member without a GPU pays today.
 |---:|---:|---:|---:|---:|---:|
 | 1 | 7 | 3 | 615.5 s | 6.7 GB | 226,717 B |
 | 5 | 7 | 7 | 720.6 s | 6.8 GB | 226,845 B |
+| 5, padded | 7 | 7 | 881.1 s | 6.8 GB | 235,740 B |
 
-About 26 s of CPU proving per extra signature, against 1.3 s on the L4. Logs:
-[`results/laptop-m4/`](results/laptop-m4/).
+About 26 s of CPU proving per extra signature, against 1.3 s on the L4. The padded row adds the
+wallet's padding (7 private actions, 512-byte notes, `--padded`): 22% more proving time and
+8.9 kB more proof at M = 5. Logs: [`results/laptop-m4/`](results/laptop-m4/).
 
 Custody, checked on the same proving path:
 
@@ -83,8 +85,8 @@ Caveats, stated plainly:
 - Like LEZ's own circuit benchmark, the private accounts' membership proofs are placeholders,
   which proving does not check against a commitment tree; the proof is not settled on a chain.
   Proving time and proof size are representative; settlement is M0 work.
-- No dummy inputs or ciphertext padding are added; a wallet pads to 7 private actions, which costs
-  more proving time.
+- The GPU rows are unpadded; `--padded` adds the wallet's 7-action and 512-byte-note padding
+  (measured on the laptop above, not yet on the GPU).
 - The guest image ID differs between build hosts (macOS vs Linux) because it is not yet built in
   RISC Zero's reproducible Docker image.
 
