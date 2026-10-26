@@ -1,5 +1,7 @@
 # Tessera
 
+[![ci](https://github.com/catalystlabsdev/logos-tessera/actions/workflows/ci.yml/badge.svg)](https://github.com/catalystlabsdev/logos-tessera/actions/workflows/ci.yml)
+
 A private-by-default M-of-N multisig for the Logos Execution Zone (LEZ), built for
 [Logos RFP-005](https://github.com/logos-co/rfp/blob/master/RFPs/RFP-005-multisig-and-coordination.md)
 by Catalyst Labs. This repository is the prototype that accompanies our proposal: the
@@ -86,6 +88,9 @@ The second check is the custody boundary: a transaction that tries to move the v
 without Tessera attaching the vault's seed is refused by LEZ's native token, not by Tessera.
 
 ## Run it
+
+CI runs the core tests, the `no_std` build, the guest build, the refusal checks and the gas
+table on every push (`.github/workflows/ci.yml`); the gas table is attached to each run.
 
 ```bash
 curl -L https://risczero.com/install | bash && rzup install cargo-risczero 3.0.5 && rzup install r0vm 3.0.5 && rzup install rust

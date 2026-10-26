@@ -1,0 +1,51 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RISC0_VERSION: "3.0.5"
+
+jobs:
+  core:
+    name: tessera_core (rules, no_std, clippy)
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: core } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { components: clippy, rustfmt, targets: wasm32v1-none }
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: core }
+      - run: cargo fmt --check
+      - run: cargo test --features std
+      - run: cargo build --no-default-features --features fixtures --target wasm32v1-none
+      - run: cargo clippy --all-targets --features std,fixtures -- -D warnings
+
+  program:
+    name: LEZ program (build guest, gas table, refusal checks)
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: program } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with: { toolchain: "1.98.1" }
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: program }
+      - name: Install RISC Zero ${{ env.RISC0_VERSION }}
+        run: |
+          curl -L https://risczero.com/install | bash
+          echo "$HOME/.risc0/bin" >> "$GITHUB_PATH"
+          "$HOME/.risc0/bin/rzup" install cargo-risczero "$RISC0_VERSION"
+          "$HOME/.risc0/bin/rzup" install r0vm "$RISC0_VERSION"
+          "$HOME/.risc0/bin/rzup" install rust
+      - run: cargo build --release -p tessera_host
+      - name: Refusal checks through LEZ's state machine
+        run: RISC0_DEV_MODE=0 ./target/release/checks
+      - name: Billed gas, M = 1..32
+        run: RISC0_DEV_MODE=0 ./target/release/measure | tee gas-table.md
+      - uses: actions/upload-artifact@v4
+        with: { name: gas-table, path: program/gas-table.md }
