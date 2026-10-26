@@ -14,7 +14,7 @@ Status: prototype, 25 October 2026 (public and private posture measured). Not au
 
 | Piece | Where | State |
 |---|---|---|
-| Authorisation rules (digests, BIP-340 approvals, roles, weights, epochs, time lock, cancel, R.2 re-check at execution) | [`core/`](core/) | 32 tests, `no_std` |
+| Authorisation rules (digests, BIP-340 approvals, roles, weights, epochs, time lock, cancel, R.2 re-check at execution) | [`core/`](core/) | 33 tests, `no_std` |
 | LEZ program on the actor model (`actor_entrypoint!`), paying from a program-derived vault | [`program/methods/guest/`](program/methods/guest/src/bin/tessera.rs) | builds against LEZ `7e3f7f76` |
 | Messages and stored state | [`program/api/`](program/api/src/lib.rs) | |
 | Gas measurement and on-chain refusal checks through `lee::V03State` | [`program/host/`](program/host/src/) | |
@@ -38,7 +38,8 @@ was paid and the vault debited. Gas is the cycle count LEZ's state machine bills
 | 32 | 32 | 34 | 9,426,581 | 94.3% | 3,792 |
 
 About 280k gas per signature, linear. M = 5 uses a fifth of one transaction's budget; M = 32
-still fits in one transaction.
+still fits in one transaction, and `tessera_core` caps a configuration at 32 members
+(`MAX_MEMBERS`) so no quorum can be formed that one transaction cannot verify.
 
 ## Measured: the private posture, proved on a GPU
 
@@ -56,6 +57,17 @@ prover, 25 October 2026:
 
 About 1.3 s of GPU proving per extra signature; the proof grows by roughly 44 bytes per
 signature. Logs: [`results/gpu-l4/`](results/gpu-l4/).
+
+The same proofs on an **Apple M4 laptop (10 cores, 24 GB), CPU only**: RISC Zero 3.0 does not
+use Metal for this circuit, so this is what a member without a GPU pays today.
+
+| M | N | signatures checked | private proof (wall) | peak RSS | proof size |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 7 | 3 | 615.5 s | 6.7 GB | 226,717 B |
+| 5 | 7 | 7 | 720.6 s | 6.8 GB | 226,845 B |
+
+About 26 s of CPU proving per extra signature, against 1.3 s on the L4. Logs:
+[`results/laptop-m4/`](results/laptop-m4/).
 
 Custody, checked on the same proving path:
 

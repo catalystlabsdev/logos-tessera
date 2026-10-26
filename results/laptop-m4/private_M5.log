@@ -1,2 +1,21 @@
 tessera image id: c01b07aeca5e2a97b2aab3d0eb3d80388d7d1d16cb0daf09e3489f5555fe173d
 M = 5, N = 7, signatures checked = 7, RISC0_DEV_MODE="0"
+RESULT private QueueAndExecute M=5 prove_wall_s=720.6 proof_bytes=226845 private_actions=2
+      721.42 real      5822.52 user        62.74 sys
+          6811828224  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+             6506370  page reclaims
+                1934  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                  24  messages sent
+                 102  messages received
+                   0  signals received
+               27924  voluntary context switches
+             8650812  involuntary context switches
+           919176376  instructions retired
+           295889789  cycles elapsed
+             8470864  peak memory footprint

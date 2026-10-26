@@ -9,7 +9,7 @@ What it decides, as pure functions over borsh-serialisable state:
 
 | Function | Rule |
 |---|---|
-| `validate_config` | roster/threshold sanity (non-empty, ≤256 members, weights ≥1, distinct valid BIP-340 keys, role bits ⊆ PROPOSE\|APPROVE\|EXECUTE, 1 ≤ threshold ≤ total APPROVE weight, ≥1 proposer, ≥1 executor) |
+| `validate_config` | roster/threshold sanity (non-empty, ≤32 members, weights ≥1, distinct valid BIP-340 keys, role bits ⊆ PROPOSE\|APPROVE\|EXECUTE, 1 ≤ threshold ≤ total APPROVE weight, ≥1 proposer, ≥1 executor) |
 | `activate` | threshold-weight `activate`-domain approvals over the activation digest; sets `initialised` |
 | `queue` | activated; `signed_epoch == epoch`; window valid and closes before expiry; calls inside action set; no forbidden account; PROPOSE signer; distinct APPROVE signers reach threshold → `Queued` |
 | `execute` | exact queued proposal (digest recomputed); not executed/cancelled; EXECUTE signer; time lock elapsed pessimistically; window closes before expiry; serialised config changes; **R.2: stored approvers re-counted against the current roster and threshold** → `Executed { queued, effect }` |

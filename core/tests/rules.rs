@@ -1142,3 +1142,20 @@ fn every_error_code_is_unique_and_stable() {
         assert!(!f.message().is_empty());
     }
 }
+
+/// P.2: the member cap matches what one public transaction can verify (M = 32 bills 94% of
+/// the 10M-gas cap), so no configuration can reach a quorum that never executes.
+#[test]
+fn member_count_is_capped_at_what_one_transaction_verifies() {
+    assert_eq!(MAX_MEMBERS, 32);
+    let f = tessera_core::fixtures::fixture(32, 32, [32; 32]);
+    assert_eq!(validate_config(&f.config), Ok(()));
+    let mut c = f.config.clone();
+    c.members.push(c.members[0].clone());
+    c.members[32].key = [0x02; 32]; // a different key, so the fault is the count, not a duplicate
+    assert!(matches!(
+        validate_config(&c),
+        Err(Error::InvalidConfig(ConfigFault::TooManyMembers))
+            | Err(Error::InvalidConfig(ConfigFault::InvalidMemberKey))
+    ));
+}

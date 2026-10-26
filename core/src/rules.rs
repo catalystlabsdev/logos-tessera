@@ -14,7 +14,12 @@ use crate::types::{
 };
 
 /// Upper bound on roster size (bounds in-guest work and account size).
-pub const MAX_MEMBERS: usize = 256;
+/// Largest member set a configuration may hold.
+///
+/// Set by what one public transaction can verify: a whole `QueueAndExecute` checks M + 2
+/// signatures and M = 32 (34 signatures) bills 94% of LEZ's 10M-gas cap, so a configuration
+/// with more members could reach a quorum that never executes.
+pub const MAX_MEMBERS: usize = 32;
 /// Upper bound on a transaction validity window. Wider windows are never unsafe (time is
 /// evaluated pessimistically) but are refused as almost certainly a client bug.
 pub const MAX_WINDOW_MS: u64 = 24 * 60 * 60 * 1000;
