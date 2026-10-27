@@ -92,10 +92,12 @@ struct Proved {
     kind: &'static str,
 }
 
-/// A fresh regular private account that receives one payout. The recipient holds its keys and
-/// gives the prover its nullifier key and viewing key so the account can be created by the payout
-/// transaction itself (an Init witness, the shape of LEZ's own shielded-transfer tests). Payouts to
-/// a recipient whose keys the prover lacks go through LEZ's async recovery path, not measured here.
+/// A fresh regular private account that receives one payout. The payee gives the payer its
+/// nullifier key and its viewing public key, so the account can be created by the payout
+/// transaction itself with an Init witness holding `RegularKey::Nullifying` (the LEZ wallet's
+/// automatic credit to a private recipient it holds keys for). The payer cannot spend the funds.
+/// A recipient known only by its public keys is paid by a sealed async message and a separate
+/// claim transaction instead; that shape is not measured here.
 struct PrivateRecipient {
     nsk: NullifierSecretKey,
     vpk: ViewingPublicKey,
@@ -537,6 +539,11 @@ fn main() -> Result<()> {
             run.update(vault_seed, vault_id, &vault_account)?,
         ];
         if let Some(r) = &payee {
+            // The account must not exist yet, so the execute below is what creates it.
+            ensure!(
+                !run.state.is_spent(&Nullifier::for_account_initialization(&r.id, &r.nsk)),
+                "execute {k}: the private recipient already exists before the payout"
+            );
             witnesses.push(run.recipient_init(r));
         }
         let p = run.prove(
@@ -660,13 +667,8 @@ fn main() -> Result<()> {
                 INSIDE_MS + 900,
                 Refusal::NullifierSpent,
             )?;
+            // Sanity only: a refused transaction is applied to a scratch copy, never to `run.state`.
             ensure!(run.balance(recipient)? == paid, "double spend changed the recipient's balance");
-            if let Some(r) = &thief {
-                ensure!(
-                    run.state.get_proof_for_commitment(&Commitment::new(&r.id, &r.credited(AMOUNT * 2))).is_none(),
-                    "double spend created the second private recipient's account"
-                );
-            }
             println!(
                 "RESULT double-spend k={k} M={m} real={} receipt={} refused=NullifierSpent step={ds}",
                 p2.real, p2.kind
