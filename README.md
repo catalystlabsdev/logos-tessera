@@ -5,7 +5,7 @@
 A private-by-default M-of-N multisig for the Logos Execution Zone (LEZ), built for
 [Logos RFP-005](https://github.com/logos-co/rfp/blob/master/RFPs/RFP-005-multisig-and-coordination.md)
 by Catalyst Labs. This repository is the prototype that accompanies our proposal: the
-authorisation rules, a guest program on LEZ 0.4's actor model, and a harness that drives the
+authorisation rules, a guest program on LEZ's actor model (`dev` `7e3f7f76`), and a harness that drives the
 committed guest through LEZ's own state machine.
 
 Status: prototype, 27 October 2026 (public posture measured; private lifecycle proved with real
@@ -21,7 +21,7 @@ sequencer). Not audited. Do not hold real funds with it.
 | Messages and stored state | [`program/api/`](program/api/src/lib.rs) | |
 | Gas measurement, refusal checks and the settled private lifecycle through `lee::V03State` (`settle`), and on a running sequencer (`settle_rpc`) | [`program/host/`](program/host/src/) | |
 
-## Measured: a whole execute on LEZ 0.4, under the 10M cap
+## Measured: a whole execute on LEZ's actor model, under the 10M cap
 
 One zero-time-lock `QueueAndExecute` transaction: the program verifies the proposer, M approvals
 and the executor (M + 2 BIP-340 signatures, RISC Zero's accelerated `k256`), writes the executed
@@ -47,7 +47,7 @@ still fits in one transaction, and `tessera_core` caps a configuration at 32 mem
 
 `settle` runs Tessera's whole private lifecycle as privacy-preserving transactions and settles
 each one, in process, through LEZ's own state machine (`lee::V03State` at `dev` commit
-`7e3f7f76`, v0.3.0+135, the actor-model branch pending the testnet 0.4 tag). LEZ verifies each
+`7e3f7f76`, v0.3.0+135, the actor-model branch pending the 0.4 tag). LEZ verifies each
 RISC Zero receipt against the privacy circuit's image ID and the settled message before it
 applies any diff; the steps:
 
@@ -59,7 +59,8 @@ applies any diff; the steps:
    directly, without Tessera's seed grant; LEZ's native token refuses at execution, so no
    proof can exist for that transaction.
 5. `QueueAndExecute`, chained: M approvals verified in the guest, vault debited, an existing
-   public recipient credited; repeated from the new state.
+   public recipient credited (or, with `--private-recipient`, a fresh private account created
+   and credited); repeated from the new state.
 
 For every execute the harness also shows: refused outside its validity window
 (`OutOfValidityWindow`, a check LEZ makes before it verifies the receipt); settled inside it with the exact post-state commitments recorded and
@@ -113,12 +114,13 @@ The same lifecycle with each payout going to a **new regular private account** c
 execute itself: the payee gives the payer its nullifier key and viewing public key, and an Init
 witness holding only `RegularKey::Nullifying` (the LEZ wallet's automatic credit to a private
 recipient it holds keys for) creates the account while the native-token credit is promoted into
-it. The payer cannot spend the funds. Three private actions unpadded (configuration update,
+it. The payer cannot spend the funds; holding the nullifier key, it can recognise the payee's
+first spend of them. Three private actions unpadded (configuration update,
 vault update, recipient initialisation), seven padded. Per execute the harness checks that the
 payee does not exist before, that afterwards its commitment for exactly the payout is in the
-tree (and the same account with any other balance is not) and its initialisation nullifier is
-spent, and repeats the window, resubmission and double-spend refusals (the double spend pays a
-second fresh account).
+tree (and, as a negative control, the same account holding one unit more is not) and its
+initialisation nullifier is spent, and repeats the window and resubmission refusals (and, with `--double-spend`, the double
+spend, which pays a second fresh account).
 
 Real proving, 27 October 2026, commit `e7ae6d8`:
 
@@ -222,7 +224,7 @@ tag). The toolchain is pinned in `program/rust-toolchain.toml`.
   run verifies real receipts).
 - A payout to a private recipient known only by its public keys (sealed async message plus
   the recipient's claim).
-- The deposit sweep's proving cost, the CPU curve beyond M = 10, and a reproducible guest build (the
+- The deposit sweep's proving cost, the padded CPU curve and the CPU curve beyond M = 10, and a reproducible guest build (the
   image ID differs by build host).
 - In `measure`, `checks` and `settle` public transactions carry no fee payer; the only fee path
   exercised is the public `program_loader` deploy in the dev-mode sequencer run
