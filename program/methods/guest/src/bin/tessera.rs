@@ -79,8 +79,11 @@ fn handle_message(input: &ReceiveInput, msg: Msg) -> Response {
     match msg {
         Msg::Create { ctx, config, vault_seed, vault_id, private } => {
             assert!(input.pre_state.is_empty(), "tessera: multisig already exists");
-            // Public posture: the configuration lives at the public PDA. Private posture: the
-            // privacy circuit has already bound the private PDA to (program, multisig_id).
+            // Public posture: the configuration must live at this program's PDA for `multisig_id`,
+            // so one multisig has one address. Private posture: the circuit binds the receiver to
+            // the witness's own (program, seed) derivation but does not tell the guest which seed
+            // was used; uniqueness per `multisig_id` is a client-side rule there (M1 adds the
+            // seed as a claim the guest checks).
             if !private {
                 let expected = AccountId::for_public_pda(&program, &PdaSeed::new(config.multisig_id));
                 assert!(input.receiver.account_id == expected, "tessera: wrong configuration account");

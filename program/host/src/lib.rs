@@ -14,17 +14,58 @@ use lee_core::{
     program::PdaSeed,
 };
 use tessera_api::{Msg, State};
-use tessera_core::{AccountRef, Action, Call, Context, Proposal, fixtures::{self, Fixture}};
+use tessera_core::{
+    AccountRef, Action, Call, Context, Proposal,
+    fixtures::{self, Fixture},
+};
 
 pub const MAX_GAS_EXEC: u64 = 10_000_000;
 pub const AMOUNT: u128 = 1_000;
 pub const VAULT_FUNDS: u128 = 1_000_000;
 
+/// A wallet pads every private transaction to 7 private actions and 512-byte notes, so that
+/// observers cannot count real accounts. Mirrors LEZ's own `cycle_bench` dummies.
+pub const PADDED_ACTIONS: usize = 7;
+pub const CIPHERTEXT_PAD: u32 = 512;
+
+pub fn no_seal(body: &lee_core::program::MessageBody) -> Result<lee_core::RecipientEncryption, lee::error::LeeError> {
+    Err(lee::error::LeeError::InvalidInput(format!("no seal for async message to {:?}", body.to)))
+}
+
+/// Wallet-style dummy inputs: anchored at `commitment_root` (the wallet uses the live root), a
+/// real ML-KEM encapsulation toward a throwaway key, and a random padded note.
+pub fn dummy_inputs(count: usize, commitment_root: [u8; 32]) -> Vec<lee_core::DummyInput> {
+    use lee_core::encryption::{Ciphertext, MlKem768EncapsulationKey};
+    use lee_core::{DummyInput, DummyOutput, EncryptedNote, SharedSecretKey};
+    use rand::{RngCore, rngs::OsRng};
+    let random = || {
+        let mut b = [0u8; 32];
+        OsRng.fill_bytes(&mut b);
+        b
+    };
+    (0..count)
+        .map(|_| {
+            let ek = MlKem768EncapsulationKey::from_seed(&random(), &random());
+            let (_, epk) = SharedSecretKey::encapsulate(&ek);
+            let mut ciphertext = vec![0u8; CIPHERTEXT_PAD as usize];
+            OsRng.fill_bytes(&mut ciphertext);
+            DummyInput {
+                nullifier_seed: random(),
+                commitment_root,
+                output: DummyOutput {
+                    commitment_seed: random(),
+                    note: EncryptedNote { ciphertext: Ciphertext::from_inner(ciphertext), epk },
+                },
+            }
+        })
+        .collect()
+}
+
 pub fn program() -> Result<Program> {
     Program::new(tessera_methods::TESSERA_ELF.into()).map_err(|e| anyhow!("{e:?}"))
 }
 
-fn sha(parts: &[&[u8]]) -> [u8; 32] {
+pub fn sha(parts: &[&[u8]]) -> [u8; 32] {
     use risc0_zkvm::sha::rust_crypto::{Digest, Sha256};
     let mut h = Sha256::new();
     for p in parts {
@@ -65,7 +106,8 @@ impl World {
         };
         let proposal = Proposal { proposal_id: 1, expires_at_ms: 1_000_000_000, action: Action::Calls(vec![call]) };
         f.resign(proposal, m);
-        let stored = State { ctx: f.ctx.clone(), config: f.config.clone(), vault_seed, vault_id: *vault.value(), queued: Vec::new() };
+        let stored =
+            State { ctx: f.ctx, config: f.config.clone(), vault_seed, vault_id: *vault.value(), queued: Vec::new() };
         let config_account =
             Account::default().with_actor_state(program_acct, ActorState::from(borsh::to_vec(&stored)?));
         let state = V03State::new()
@@ -84,9 +126,9 @@ impl World {
         Msg::QueueAndExecute {
             proposal: f.proposal.clone(),
             signed_epoch: f.config.epoch,
-            proposer: f.proposer.clone(),
+            proposer: f.proposer,
             approvals: f.approvals.clone(),
-            executor: f.executor.clone(),
+            executor: f.executor,
             env: f.env.clone(),
         }
     }

@@ -13,6 +13,7 @@ tessera_core = { path = "../../core", features = ["std", "fixtures"] }
 risc0-zkvm.workspace = true
 borsh.workspace = true
 anyhow.workspace = true
+rand = { version = "0.8.5", features = ["std", "std_rng", "getrandom"] }
 
 [features]
 default = []

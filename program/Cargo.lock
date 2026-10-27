@@ -4944,6 +4944,7 @@ dependencies = [
  "borsh",
  "lee",
  "lee_core",
+ "rand 0.8.8",
  "risc0-zkvm",
  "tessera_api",
  "tessera_core",

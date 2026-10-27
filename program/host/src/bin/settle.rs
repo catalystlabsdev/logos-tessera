@@ -2,15 +2,26 @@
 //!
 //! Every step is a privacy-preserving transaction proved in LEZ's circuit against the live
 //! commitment tree and applied by `V03State`:
-//!   1. `Create`   — the configuration is born as a private PDA of Tessera (Init witness).
-//!   2. `Activate` — the members confirm it (threshold signatures; Update witness).
-//!   3. fund       — a public account shields `VAULT_FUNDS` into the private vault PDA.
-//!   4. `QueueAndExecute` (×`--chain`) — M approvals verified, vault debited, recipient credited.
-//! For each execute the harness also shows: refused outside its validity window, settled inside
-//! it, exact post-state commitments recorded, and a replay refused (nullifiers spent).
+//!
+//! 1. `Create`: the configuration is born as a private PDA of Tessera (Init witness).
+//! 2. `Activate`: the members confirm it (threshold signatures; Update witness).
+//! 3. fund: a public account shields `VAULT_FUNDS` into the private vault PDA.
+//! 4. custody: a group-key holder's direct debit of the live vault, without Tessera's seed, is
+//!    refused by LEZ's native token inside the circuit (no proof can exist).
+//! 5. `QueueAndExecute`, `--chain` times: M approvals verified, vault debited, an existing
+//!    public recipient credited.
+//!
+//! For each execute the harness also shows: refused outside its proven validity window
+//! (`OutOfValidityWindow`), settled inside it with the exact post-state commitments recorded and
+//! the pre-states' nullifiers marked spent, an identical resubmission refused (LEZ's
+//! commitment-freshness check fires first), and, with `--double-spend`, a fresh execute proved
+//! against the already-spent pre-state refused with `Nullifier already seen`. Each step's output
+//! names its receipt kind (succinct STARK, or fake for a dev-mode stub).
 //!
 //! Flags: `--padded` (wallet padding: 7 private actions, 512-byte notes), `--chain N`,
-//! `--real-from K` (steps before K prove in dev mode, so a CPU run only pays for the execute).
+//! `--double-spend`, `--real-from K` (steps before K use dev-mode stubs: executed on the real
+//! inputs and settled with every check except receipt verification, so a CPU run only pays for
+//! the execute; every RESULT line says whether its step was real).
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     time::Instant,
@@ -18,73 +29,65 @@ use std::{
 
 use anyhow::{Result, anyhow, bail, ensure};
 use lee::{
-    PrivacyPreservingTransaction, PrivateKey, ProvingInput, PublicExecutionContext, PublicKey,
-    SenderPresentation, Simulation, V03State, error::LeeError, execute_and_prove,
+    PrivacyPreservingTransaction, PrivateKey, ProvingInput, PublicExecutionContext, PublicKey, SenderPresentation,
+    Simulation, V03State,
+    error::LeeError,
+    execute_and_prove,
     privacy_preserving_transaction::{Message, WitnessSet, circuit::ProgramCatalog},
 };
 use lee_core::{
-    AuthorizationSecretKey, Commitment, DUMMY_COMMITMENT_HASH, DummyInput, DummyOutput,
-    EncryptedNote, NullifierPublicKey, NullifierSecretKey, NullifierWitness, PrivateWitness,
-    RecipientEncryption, RootCall, SharedSecretKey, WitnessKind,
+    AuthorizationSecretKey, Commitment, Nullifier, NullifierPublicKey, NullifierSecretKey, NullifierWitness,
+    PrivateWitness, RootCall, WitnessKind,
     account::{Account, AccountId, Actor, ActorState, Nonce},
-    encryption::{Ciphertext, MlKem768EncapsulationKey, ViewingPublicKey},
+    encryption::ViewingPublicKey,
     execution_state::TransactionEntry,
     native_token::{self, NATIVE_TOKEN_PROGRAM_ID},
-    program::{MessageBody, PdaSeed},
+    program::PdaSeed,
 };
+use risc0_zkvm::InnerReceipt;
 use tessera_api::{Msg, State};
 use tessera_core::{AccountRef, Action, Call, Config, Context, Proposal, Purpose, fixtures};
-use tessera_host::{AMOUNT, VAULT_FUNDS, hex, program};
+use tessera_host::{AMOUNT, CIPHERTEXT_PAD, PADDED_ACTIONS, VAULT_FUNDS, dummy_inputs, hex, no_seal, program, sha};
 
-const PADDED_ACTIONS: usize = 7;
-const CIPHERTEXT_PAD: u32 = 512;
 const BLOCK: u64 = 1;
 const INSIDE_MS: u64 = 2_000; // the fixture's execute window is [1_000, 61_000)
 const OUTSIDE_MS: u64 = 100_000;
 
-fn sha(parts: &[&[u8]]) -> [u8; 32] {
-    use risc0_zkvm::sha::rust_crypto::{Digest, Sha256};
-    let mut h = Sha256::new();
-    for p in parts {
-        h.update(p);
-    }
-    h.finalize().into()
-}
-
-fn no_seal(body: &MessageBody) -> Result<RecipientEncryption, LeeError> {
-    Err(LeeError::InvalidInput(format!("no seal for async message to {:?}", body.to)))
-}
-
-fn dummy_inputs(count: usize, seed: u8) -> Vec<DummyInput> {
-    (0..count)
-        .map(|i| {
-            let tag = |k: u8| sha(&[b"tessera/dummy", &[seed, i as u8, k]]);
-            let ek = MlKem768EncapsulationKey::from_seed(&tag(1), &tag(2));
-            let (_, epk) = SharedSecretKey::encapsulate(&ek);
-            let mut ciphertext = vec![0u8; CIPHERTEXT_PAD as usize];
-            for (j, b) in ciphertext.iter_mut().enumerate() {
-                *b = tag(3)[j % 32] ^ (j as u8);
-            }
-            DummyInput {
-                nullifier_seed: tag(4),
-                commitment_root: DUMMY_COMMITMENT_HASH,
-                output: DummyOutput {
-                    commitment_seed: tag(5),
-                    note: EncryptedNote { ciphertext: Ciphertext::from_inner(ciphertext), epk },
-                },
-            }
-        })
-        .collect()
-}
-
-fn err_head(e: &LeeError) -> String {
-    format!("{e:?}").chars().take(110).collect()
-}
-
 fn set_dev_mode(on: bool) {
-    // RISC Zero reads RISC0_DEV_MODE when a prover is built, so flipping it between steps works.
-    // SAFETY: single-threaded at this point; no other thread reads the environment.
+    // SAFETY: `set_var` is unsound only if another thread reads or writes the environment at
+    // the same time. RISC Zero's rayon workers stay alive after the first proof, but they only
+    // run while a proof is in progress, and none is in progress here; this harness has no other
+    // threads of its own. The flip takes effect because `lee::execute_and_prove` calls
+    // `risc0_zkvm::default_prover()` afresh on every call and `is_dev_mode()` re-reads the
+    // variable each time; neither caches a prover.
     unsafe { std::env::set_var("RISC0_DEV_MODE", if on { "1" } else { "0" }) }
+}
+
+/// What a refused settlement must say; anything else is a failure, not a pass.
+enum Refusal {
+    OutsideWindow,
+    DuplicateCommitments,
+    NullifierSpent,
+}
+
+impl Refusal {
+    fn matches(&self, e: &LeeError) -> bool {
+        match (self, e) {
+            (Refusal::OutsideWindow, LeeError::OutOfValidityWindow) => true,
+            (Refusal::DuplicateCommitments, LeeError::InvalidInput(m)) => m == "Commitment already seen",
+            (Refusal::NullifierSpent, LeeError::InvalidInput(m)) => m == "Nullifier already seen",
+            _ => false,
+        }
+    }
+}
+
+struct Proved {
+    tx: PrivacyPreservingTransaction,
+    secs: f64,
+    real: bool,
+    proof_bytes: usize,
+    actions: usize,
+    kind: &'static str,
 }
 
 struct Run {
@@ -92,24 +95,35 @@ struct Run {
     catalog: ProgramCatalog,
     program_acct: AccountId,
     nsk: NullifierSecretKey,
-    npk: NullifierPublicKey,
     vpk: ViewingPublicKey,
     padded: bool,
     step_no: usize,
     real_from: usize,
+    real_prove_s: f64,
 }
 
 impl Run {
+    /// Opens the next step; witnesses built after this carry the step's number in their seeds.
+    fn next_step(&mut self) -> usize {
+        self.step_no += 1;
+        self.step_no
+    }
+
+    fn is_real(&self) -> bool {
+        self.step_no >= self.real_from
+    }
+
     fn pda_witness(&self, seed: PdaSeed, nullifier: NullifierWitness) -> PrivateWitness {
         PrivateWitness {
             vpk: self.vpk.clone(),
             random_seed: sha(&[b"seed", seed.as_bytes(), &[self.step_no as u8]]),
-            kind: WitnessKind::Pda { nsk: self.nsk.clone(), binding: (self.program_acct, seed) },
+            kind: WitnessKind::Pda { nsk: self.nsk, binding: (self.program_acct, seed) },
             nullifier,
             address_openings: BTreeSet::new(),
         }
     }
 
+    /// An Update witness with a membership proof taken from the live tree.
     fn update(&self, seed: PdaSeed, id: AccountId, account: &Account) -> Result<PrivateWitness> {
         let proof = self
             .state
@@ -119,39 +133,33 @@ impl Run {
     }
 
     fn init(&self, seed: PdaSeed) -> PrivateWitness {
-        self.pda_witness(seed, NullifierWitness::Init { commitment_root: DUMMY_COMMITMENT_HASH })
+        self.pda_witness(seed, NullifierWitness::Init { commitment_root: self.state.commitment_root() })
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn prove(
-        &mut self,
-        label: &str,
-        root: RootCall,
-        public_actors: Vec<Actor>,
-        signers: &[&PrivateKey],
-        public_states: Vec<(Actor, ActorState)>,
-        witnesses: Vec<PrivateWitness>,
-        promote_to: Option<AccountId>,
-    ) -> Result<(PrivacyPreservingTransaction, f64, usize)> {
-        self.step_no += 1;
-        set_dev_mode(self.step_no < self.real_from);
+    fn prove(&mut self, label: &str, step: Step) -> Result<Proved> {
+        let real = self.is_real();
+        set_dev_mode(!real);
         let signer_ids: HashSet<AccountId> =
-            signers.iter().map(|k| AccountId::from(&PublicKey::new_from_private_key(k))).collect();
-        let nonces: BTreeMap<AccountId, Nonce> = signer_ids
-            .iter()
-            .map(|id| (*id, self.state.get_account_by_id(*id).nonce))
-            .collect();
-        let n_private = witnesses.len();
+            step.signers.iter().map(|k| AccountId::from(&PublicKey::new_from_private_key(k))).collect();
+        let nonces: BTreeMap<AccountId, Nonce> =
+            signer_ids.iter().map(|id| (*id, self.state.get_account_by_id(*id).nonce)).collect();
+        let n_private = step.witnesses.len();
         let input = ProvingInput {
-            root: TransactionEntry::Sync(root),
-            public_context: PublicExecutionContext::new(public_actors, signer_ids),
-            private_witnesses: witnesses,
-            dummy_inputs: if self.padded { dummy_inputs(PADDED_ACTIONS - n_private, self.step_no as u8) } else { Vec::new() },
+            root: TransactionEntry::Sync(step.root),
+            public_context: PublicExecutionContext::new(step.public_actors, signer_ids),
+            private_witnesses: step.witnesses,
+            dummy_inputs: if self.padded {
+                dummy_inputs(PADDED_ACTIONS - n_private, self.state.commitment_root())
+            } else {
+                Vec::new()
+            },
             ciphertext_padding: if self.padded { Some(CIPHERTEXT_PAD) } else { None },
             recoveries: Vec::new(),
             private_promotions: BTreeSet::new(),
         };
-        let simulation = Simulation { public_actor_states: public_states.into_iter().collect(), admitted_accounts: None };
+        let simulation =
+            Simulation { public_actor_states: step.public_states.into_iter().collect(), admitted_accounts: None };
+        let promote_to = step.promote_to;
         let started = Instant::now();
         let (output, proof) = execute_and_prove(
             input,
@@ -163,15 +171,41 @@ impl Run {
         )
         .map_err(|e| anyhow!("step {} ({label}): proving failed: {e:?}", self.step_no))?;
         let secs = started.elapsed().as_secs_f64();
+        if real {
+            self.real_prove_s += secs;
+        }
         let actions = output.execution.private_actions.len();
-        let message = Message::from_circuit_output(nonces, output);
-        let witness_set = WitnessSet::for_message(&message, proof, signers);
-        println!(
-            "    step {} ({label}): proved in {secs:.1} s, {actions} private actions, dev_mode={}",
-            self.step_no,
-            self.step_no < self.real_from
+        // The proof is the borsh encoding of a RISC Zero `InnerReceipt`; its kind is the record of
+        // whether this step carried a real STARK (succinct) or a dev-mode stub (fake).
+        let raw: Vec<u8> = borsh::from_slice(&borsh::to_vec(&proof)?)?;
+        let proof_bytes = raw.len();
+        let kind = match borsh::from_slice::<InnerReceipt>(&raw) {
+            Ok(InnerReceipt::Succinct(_)) => "succinct",
+            Ok(InnerReceipt::Composite(_)) => "composite",
+            Ok(InnerReceipt::Fake(_)) => "fake(dev-mode)",
+            Ok(_) => "other",
+            Err(_) => "undecodable",
+        };
+        ensure!(
+            real == (kind == "succinct" || kind == "composite"),
+            "step {}: receipt kind {kind} does not match real={real}",
+            self.step_no
         );
-        Ok((PrivacyPreservingTransaction::new(message, witness_set), secs, actions))
+        let message = Message::from_circuit_output(nonces, output);
+        let witness_set = WitnessSet::for_message(&message, proof, step.signers);
+        println!(
+            "    step {} ({label}): {} in {secs:.1} s, {actions} private actions, receipt {kind}, {proof_bytes} B",
+            self.step_no,
+            if real { "proved" } else { "dev-mode stub (no proof)" }
+        );
+        Ok(Proved {
+            tx: PrivacyPreservingTransaction::new(message, witness_set),
+            secs,
+            real,
+            proof_bytes,
+            actions,
+            kind,
+        })
     }
 
     fn settle(&mut self, label: &str, tx: &PrivacyPreservingTransaction, at_ms: u64) -> Result<f64> {
@@ -182,15 +216,66 @@ impl Run {
         Ok(t.elapsed().as_secs_f64() * 1000.0)
     }
 
-    fn expect_refused(&self, label: &str, tx: &PrivacyPreservingTransaction, at_ms: u64) -> Result<()> {
+    /// Settles `tx` on a copy of the state and requires exactly `expected` as the refusal.
+    fn expect_refused(
+        &self,
+        label: &str,
+        tx: &PrivacyPreservingTransaction,
+        at_ms: u64,
+        expected: Refusal,
+    ) -> Result<()> {
         let mut copy = self.state.clone();
         match copy.transition_from_privacy_preserving_transaction(tx, BLOCK, at_ms) {
             Ok(()) => bail!("step {} ({label}): was accepted, expected a refusal", self.step_no),
+            Err(e) if expected.matches(&e) => {
+                println!("ok  step {} ({label}): refused ({e:?})", self.step_no);
+                Ok(())
+            }
+            Err(e) => bail!("step {} ({label}): refused for the wrong reason: {e:?}", self.step_no),
+        }
+    }
+
+    /// Runs the circuit on `step` and requires it to refuse before any proof exists.
+    fn expect_unprovable(&mut self, label: &str, step: Step, needle: &str) -> Result<()> {
+        let signer_ids: HashSet<AccountId> =
+            step.signers.iter().map(|k| AccountId::from(&PublicKey::new_from_private_key(k))).collect();
+        let input = ProvingInput {
+            root: TransactionEntry::Sync(step.root),
+            public_context: PublicExecutionContext::new(step.public_actors, signer_ids),
+            private_witnesses: step.witnesses,
+            dummy_inputs: Vec::new(),
+            ciphertext_padding: None,
+            recoveries: Vec::new(),
+            private_promotions: BTreeSet::new(),
+        };
+        let simulation =
+            Simulation { public_actor_states: step.public_states.into_iter().collect(), admitted_accounts: None };
+        match execute_and_prove(
+            input,
+            &simulation,
+            &self.catalog,
+            |_| SenderPresentation::Canonical,
+            |_, _| false,
+            no_seal,
+        ) {
+            Ok(_) => bail!("step {} ({label}): a proof was produced, expected a refusal", self.step_no),
             Err(e) => {
-                println!("ok  step {} ({label}): refused ({})", self.step_no, err_head(&e));
+                let text = format!("{e:?}");
+                ensure!(text.contains(needle), "step {} ({label}): refused for the wrong reason: {text}", self.step_no);
+                println!(
+                    "ok  step {} ({label}): no proof possible ({})",
+                    self.step_no,
+                    text.chars().take(110).collect::<String>()
+                );
                 Ok(())
             }
         }
+    }
+
+    fn assert_spent(&self, label: &str, id: AccountId, pre: &Account) -> Result<()> {
+        let n = Nullifier::for_account_update(&Commitment::new(&id, pre), &self.nsk);
+        ensure!(self.state.is_spent(&n), "{label}: nullifier of the spent {id} pre-state not recorded");
+        Ok(())
     }
 
     fn balance(&self, id: AccountId) -> Result<u128> {
@@ -198,31 +283,75 @@ impl Run {
     }
 }
 
+struct Step<'a> {
+    root: RootCall,
+    public_actors: Vec<Actor>,
+    signers: &'a [&'a PrivateKey],
+    public_states: Vec<(Actor, ActorState)>,
+    witnesses: Vec<PrivateWitness>,
+    promote_to: Option<AccountId>,
+}
+
+impl<'a> Step<'a> {
+    fn private(root: RootCall, witnesses: Vec<PrivateWitness>) -> Self {
+        Step { root, public_actors: Vec::new(), signers: &[], public_states: Vec::new(), witnesses, promote_to: None }
+    }
+}
+
 fn bump(account: &Account, nsk: &NullifierSecretKey, program: AccountId, data: ActorState) -> Account {
-    Account { nonce: account.nonce.private_account_nonce_increment(nsk), ..Account::default().with_actor_state(program, data) }
+    Account {
+        nonce: account.nonce.private_account_nonce_increment(nsk),
+        ..Account::default().with_actor_state(program, data)
+    }
+}
+
+fn payout_proposal(id: u64, vault_id: AccountId, recipient: AccountId, amount: u128) -> Result<Proposal> {
+    Ok(Proposal {
+        proposal_id: id,
+        expires_at_ms: 1_000_000_000,
+        action: Action::Calls(vec![Call {
+            program_id: *NATIVE_TOKEN_PROGRAM_ID.value(),
+            image_id: [0; 32],
+            accounts: vec![
+                AccountRef { id: *vault_id.value(), writable: true, authorised: true },
+                AccountRef { id: *recipient.value(), writable: true, authorised: false },
+            ],
+            data: borsh::to_vec(&native_token::Message::Transfer { to: recipient, amount })?,
+        }]),
+    })
+}
+
+fn execute_msg(f: &fixtures::Fixture) -> Msg {
+    Msg::QueueAndExecute {
+        proposal: f.proposal.clone(),
+        signed_epoch: f.config.epoch,
+        proposer: f.proposer,
+        approvals: f.approvals.clone(),
+        executor: f.executor,
+        env: f.env.clone(),
+    }
 }
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let m: usize = args.get(1).and_then(|a| a.parse().ok()).unwrap_or(5);
-    let flag = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).and_then(|v| v.parse::<usize>().ok());
+    let flag = |name: &str| {
+        args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).and_then(|v| v.parse::<usize>().ok())
+    };
     let padded = args.iter().any(|a| a == "--padded");
+    let double_spend = args.iter().any(|a| a == "--double-spend");
     let chain = flag("--chain").unwrap_or(1);
-    let real_from = flag("--real-from").unwrap_or(1);
+    let dev_env = std::env::var("RISC0_DEV_MODE").unwrap_or_default() == "1";
+    let real_from = if dev_env { usize::MAX } else { flag("--real-from").unwrap_or(1) };
     let n = m.max(7);
-    let dev_env = std::env::var("RISC0_DEV_MODE").unwrap_or_default();
-    if dev_env == "1" {
-        // Honour a global dev-mode request: everything stays in dev mode.
-    }
-    let real_from = if dev_env == "1" { usize::MAX } else { real_from };
 
     let program = program()?;
     let program_acct = AccountId::from_builtin_program(program.id());
     println!("tessera image id: {}", hex(&program.id()));
     println!(
-        "M = {m}, N = {n}, signatures per execute = {}, padded = {padded}, chain = {chain}, real proving from step {}",
+        "M = {m}, N = {n}, signatures per execute = {}, padded = {padded}, chain = {chain}, double_spend = {double_spend}, real proving from step {}",
         m + 2,
-        if real_from == usize::MAX { "never (RISC0_DEV_MODE=1)".to_owned() } else { real_from.to_string() }
+        if dev_env { "never (RISC0_DEV_MODE=1)".to_owned() } else { real_from.to_string() }
     );
 
     let nsk = NullifierSecretKey::from(&AuthorizationSecretKey([11; 32]));
@@ -246,127 +375,221 @@ fn main() -> Result<()> {
             .with_programs([program.clone()]),
         catalog: ProgramCatalog::from([(program_acct, program.clone())]),
         program_acct,
-        nsk: nsk.clone(),
-        npk,
+        nsk,
         vpk,
         padded,
         step_no: 0,
         real_from,
+        real_prove_s: 0.0,
     };
     let config_actor = Actor::new(config_id, program_acct);
-    let mut total_prove = 0.0;
 
-    // 1. Create: the configuration PDA is born private, inactive.
+    // 1. Create: the configuration PDA is born private and inactive.
     let inactive = Config { initialised: false, ..f.config.clone() };
-    let msg = Msg::Create { ctx: f.ctx.clone(), config: f.config.clone(), vault_seed: *vault_seed.as_bytes(), vault_id: *vault_id.value(), private: true };
-    let init_witness = run.init(config_seed);
-    let (tx, s, _) = run.prove("create", RootCall { to: config_actor, message: borsh::to_vec(&msg)? }, vec![], &[], vec![], vec![init_witness], None)?;
-    total_prove += s;
-    run.settle("create", &tx, INSIDE_MS)?;
-    let mut tessera_state = State { ctx: f.ctx.clone(), config: inactive.clone(), vault_seed: *vault_seed.as_bytes(), vault_id: *vault_id.value(), queued: Vec::new() };
+    run.next_step();
+    let msg = Msg::Create {
+        ctx: f.ctx,
+        config: f.config.clone(),
+        vault_seed: *vault_seed.as_bytes(),
+        vault_id: *vault_id.value(),
+        private: true,
+    };
+    let w = run.init(config_seed);
+    let p =
+        run.prove("create", Step::private(RootCall { to: config_actor, message: borsh::to_vec(&msg)? }, vec![w]))?;
+    run.settle("create", &p.tx, INSIDE_MS)?;
+    let mut tessera_state = State {
+        ctx: f.ctx,
+        config: inactive.clone(),
+        vault_seed: *vault_seed.as_bytes(),
+        vault_id: *vault_id.value(),
+        queued: Vec::new(),
+    };
     let mut config_account = Account {
         nonce: Nonce::default().private_account_nonce_increment(&nsk),
         ..Account::default().with_actor_state(program_acct, ActorState::from(borsh::to_vec(&tessera_state)?))
     };
-    ensure!(run.state.get_proof_for_commitment(&Commitment::new(&config_id, &config_account)).is_some(), "create: configuration commitment not recorded");
+    ensure!(
+        run.state.get_proof_for_commitment(&Commitment::new(&config_id, &config_account)).is_some(),
+        "create: configuration commitment not recorded"
+    );
     println!("ok  step 1 (create): settled; inactive configuration committed");
 
     // 2. Activate: threshold approvals over the inactive configuration.
+    run.next_step();
     let act_digest = tessera_core::activation_digest(&f.ctx, &inactive).map_err(|e| anyhow!("{}", e.message()))?;
     let approvals: Vec<_> = (0..m).map(|i| f.sign_as(i, Purpose::Activate, &act_digest)).collect();
     let msg = Msg::Activate { approvals };
     let w = run.update(config_seed, config_id, &config_account)?;
-    let (tx, s, _) = run.prove("activate", RootCall { to: config_actor, message: borsh::to_vec(&msg)? }, vec![], &[], vec![], vec![w], None)?;
-    total_prove += s;
-    run.settle("activate", &tx, INSIDE_MS)?;
+    let p =
+        run.prove("activate", Step::private(RootCall { to: config_actor, message: borsh::to_vec(&msg)? }, vec![w]))?;
+    run.settle("activate", &p.tx, INSIDE_MS)?;
     tessera_state.config = f.config.clone();
     config_account = bump(&config_account, &nsk, program_acct, ActorState::from(borsh::to_vec(&tessera_state)?));
-    ensure!(run.state.get_proof_for_commitment(&Commitment::new(&config_id, &config_account)).is_some(), "activate: active configuration commitment not recorded");
+    ensure!(
+        run.state.get_proof_for_commitment(&Commitment::new(&config_id, &config_account)).is_some(),
+        "activate: active configuration commitment not recorded"
+    );
     println!("ok  step 2 (activate): settled; active configuration committed");
 
     // 3. Fund: a public account shields VAULT_FUNDS into the private vault PDA.
+    run.next_step();
     let funder_actor = Actor::native_balance(funder);
     let msg = native_token::Message::Transfer { to: vault_id, amount: VAULT_FUNDS };
     let w = run.init(vault_seed);
-    let (tx, s, _) = run.prove(
+    let p = run.prove(
         "fund",
-        RootCall { to: funder_actor, message: borsh::to_vec(&msg)? },
-        vec![funder_actor],
-        &[&funder_key],
-        vec![(funder_actor, native_token::encode_balance(VAULT_FUNDS))],
-        vec![w],
-        Some(vault_id),
+        Step {
+            root: RootCall { to: funder_actor, message: borsh::to_vec(&msg)? },
+            public_actors: vec![funder_actor],
+            signers: &[&funder_key],
+            public_states: vec![(funder_actor, native_token::encode_balance(VAULT_FUNDS))],
+            witnesses: vec![w],
+            promote_to: Some(vault_id),
+        },
     )?;
-    total_prove += s;
-    run.settle("fund", &tx, INSIDE_MS)?;
+    run.settle("fund", &p.tx, INSIDE_MS)?;
     let mut vault_account = Account {
         nonce: Nonce::default().private_account_nonce_increment(&nsk),
         ..Account::default().with_actor_state(NATIVE_TOKEN_PROGRAM_ID, native_token::encode_balance(VAULT_FUNDS))
     };
     ensure!(run.balance(funder)? == 0, "funder not debited");
-    ensure!(run.state.get_proof_for_commitment(&Commitment::new(&vault_id, &vault_account)).is_some(), "fund: vault commitment not recorded");
-    println!("ok  step 3 (fund): settled; funder debited, private vault committed with {VAULT_FUNDS}");
+    ensure!(
+        run.state.get_proof_for_commitment(&Commitment::new(&vault_id, &vault_account)).is_some(),
+        "fund: vault commitment not recorded"
+    );
+    println!("ok  step 3 (fund): settled; funder debited to 0, private vault committed with {VAULT_FUNDS}");
 
-    // 4.. Execute, `chain` times.
+    // 4. Custody: a holder of the group's keys tries to debit the live private vault directly,
+    //    without Tessera's seed grant. LEZ's native token refuses inside the circuit, so no
+    //    proof can exist, let alone settle.
+    run.next_step();
+    let recipient_actor = Actor::native_balance(recipient);
+    let w = run.update(vault_seed, vault_id, &vault_account)?;
+    run.expect_unprovable(
+        "group-key holder debits the live vault without Tessera's seed",
+        Step {
+            root: RootCall {
+                to: Actor::native_balance(vault_id),
+                message: borsh::to_vec(&native_token::Message::Transfer { to: recipient, amount: AMOUNT })?,
+            },
+            public_actors: vec![recipient_actor],
+            signers: &[],
+            public_states: vec![(recipient_actor, native_token::encode_balance(0))],
+            witnesses: vec![w],
+            promote_to: None,
+        },
+        "UnauthorizedSender",
+    )?;
+
+    // 5.. Execute, `chain` times.
     for k in 1..=chain {
-        let proposal = Proposal {
-            proposal_id: k as u64,
-            expires_at_ms: 1_000_000_000,
-            action: Action::Calls(vec![Call {
-                program_id: *NATIVE_TOKEN_PROGRAM_ID.value(),
-                image_id: [0; 32],
-                accounts: vec![
-                    AccountRef { id: *vault_id.value(), writable: true, authorised: true },
-                    AccountRef { id: *recipient.value(), writable: true, authorised: false },
-                ],
-                data: borsh::to_vec(&native_token::Message::Transfer { to: recipient, amount: AMOUNT })?,
-            }]),
-        };
-        f.resign(proposal, m);
-        let msg = Msg::QueueAndExecute {
-            proposal: f.proposal.clone(),
-            signed_epoch: f.config.epoch,
-            proposer: f.proposer.clone(),
-            approvals: f.approvals.clone(),
-            executor: f.executor.clone(),
-            env: f.env.clone(),
-        };
-        let recipient_actor = Actor::native_balance(recipient);
+        let step = run.next_step();
+        f.resign(payout_proposal(k as u64, vault_id, recipient, AMOUNT)?, m);
+        let msg = execute_msg(&f);
         let pre = run.balance(recipient)?;
-        let wc = run.update(config_seed, config_id, &config_account)?;
-        let wv = run.update(vault_seed, vault_id, &vault_account)?;
-        let (tx, s, actions) = run.prove(
+        let stale_config = config_account.clone();
+        let stale_vault = vault_account.clone();
+        let p = run.prove(
             "execute",
-            RootCall { to: config_actor, message: borsh::to_vec(&msg)? },
-            vec![recipient_actor],
-            &[],
-            vec![(recipient_actor, native_token::encode_balance(pre))],
-            vec![wc, wv],
-            None,
+            Step {
+                root: RootCall { to: config_actor, message: borsh::to_vec(&msg)? },
+                public_actors: vec![recipient_actor],
+                signers: &[],
+                public_states: vec![(recipient_actor, native_token::encode_balance(pre))],
+                witnesses: vec![
+                    run.update(config_seed, config_id, &config_account)?,
+                    run.update(vault_seed, vault_id, &vault_account)?,
+                ],
+                promote_to: None,
+            },
         )?;
-        total_prove += s;
-        let tx_bytes = borsh::to_vec(&tx)?.len();
-        run.expect_refused("execute outside the validity window", &tx, OUTSIDE_MS)?;
-        let settle_ms = run.settle("execute", &tx, INSIDE_MS)?;
+        let tx_bytes = borsh::to_vec(&p.tx)?.len();
+        run.expect_refused("execute outside the validity window", &p.tx, OUTSIDE_MS, Refusal::OutsideWindow)?;
+        let settle_ms = run.settle("execute", &p.tx, INSIDE_MS)?;
         let paid = run.balance(recipient)?;
         ensure!(paid == AMOUNT * k as u128, "recipient holds {paid}, expected {}", AMOUNT * k as u128);
-        println!("ok  step {} (execute {k}): settled inside the window; recipient credited {paid}", run.step_no);
+        println!("ok  step {step} (execute {k}): settled inside the window; recipient credited {paid}");
 
-        let executed = tessera_core::queue_and_execute(&f.ctx, &f.config, &f.proposal, f.config.epoch, &f.proposer, &f.approvals, &f.executor, &f.env)
-            .map_err(|e| anyhow!("core refused: {}", e.message()))?;
+        let executed = tessera_core::queue_and_execute(
+            &f.ctx,
+            &f.config,
+            &f.proposal,
+            f.config.epoch,
+            &f.proposer,
+            &f.approvals,
+            &f.executor,
+            &f.env,
+        )
+        .map_err(|e| anyhow!("core refused: {}", e.message()))?;
         tessera_state.queued.push(executed.queued);
         config_account = bump(&config_account, &nsk, program_acct, ActorState::from(borsh::to_vec(&tessera_state)?));
-        vault_account = bump(&vault_account, &nsk, NATIVE_TOKEN_PROGRAM_ID, native_token::encode_balance(VAULT_FUNDS - AMOUNT * k as u128));
-        for (name, id, acc) in [("configuration", config_id, &config_account), ("vault", vault_id, &vault_account)] {
-            ensure!(run.state.get_proof_for_commitment(&Commitment::new(&id, acc)).is_some(), "execute {k}: post-state commitment of the {name} not recorded");
-        }
-        println!("ok  step {} (execute {k}): post-state commitments recorded (vault now {})", run.step_no, VAULT_FUNDS - AMOUNT * k as u128);
-        run.expect_refused("execute replay", &tx, INSIDE_MS + 500)?;
-        println!(
-            "RESULT settled private execute k={k} M={m} padded={padded} prove_wall_s={s:.1} settle_ms={settle_ms:.0} tx_bytes={tx_bytes} private_actions={actions}"
+        vault_account = bump(
+            &vault_account,
+            &nsk,
+            NATIVE_TOKEN_PROGRAM_ID,
+            native_token::encode_balance(VAULT_FUNDS - AMOUNT * k as u128),
         );
+        for (name, id, acc) in [("configuration", config_id, &config_account), ("vault", vault_id, &vault_account)] {
+            ensure!(
+                run.state.get_proof_for_commitment(&Commitment::new(&id, acc)).is_some(),
+                "execute {k}: post-state commitment of the {name} not recorded"
+            );
+        }
+        println!(
+            "ok  step {step} (execute {k}): post-state commitments recorded (vault now {})",
+            VAULT_FUNDS - AMOUNT * k as u128
+        );
+        run.assert_spent("execute", config_id, &stale_config)?;
+        run.assert_spent("execute", vault_id, &stale_vault)?;
+        println!("ok  step {step} (execute {k}): nullifiers of the spent configuration and vault pre-states recorded");
+        run.expect_refused("execute resubmitted unchanged", &p.tx, INSIDE_MS + 500, Refusal::DuplicateCommitments)?;
+        println!(
+            "RESULT settled private execute k={k} M={m} padded={padded} real={} receipt={} prove_wall_s={:.1} proof_bytes={} tx_bytes={tx_bytes} settle_ms={settle_ms:.0} private_actions={}",
+            p.real, p.kind, p.secs, p.proof_bytes, p.actions
+        );
+
+        if double_spend {
+            // A different payout (other proposal id and amount, so no output commitment can
+            // coincide with execute k's) proved against the pre-state execute k already spent.
+            let ds = run.next_step();
+            let mut g = f.clone();
+            g.resign(payout_proposal(100 + k as u64, vault_id, recipient, AMOUNT * 2)?, m);
+            let msg = execute_msg(&g);
+            let p2 = run.prove(
+                "double-spend attempt",
+                Step {
+                    root: RootCall { to: config_actor, message: borsh::to_vec(&msg)? },
+                    public_actors: vec![recipient_actor],
+                    signers: &[],
+                    public_states: vec![(recipient_actor, native_token::encode_balance(paid))],
+                    witnesses: vec![
+                        run.update(config_seed, config_id, &stale_config)?,
+                        run.update(vault_seed, vault_id, &stale_vault)?,
+                    ],
+                    promote_to: None,
+                },
+            )?;
+            run.expect_refused(
+                "double spend of the executed pre-state",
+                &p2.tx,
+                INSIDE_MS + 900,
+                Refusal::NullifierSpent,
+            )?;
+            ensure!(run.balance(recipient)? == paid, "double spend changed the recipient's balance");
+            println!(
+                "RESULT double-spend k={k} M={m} real={} receipt={} refused=NullifierSpent step={ds}",
+                p2.real, p2.kind
+            );
+        }
     }
-    println!("RESULT lifecycle M={m} padded={padded} steps={} total_prove_s={total_prove:.1}", run.step_no);
+    println!(
+        "RESULT lifecycle M={m} padded={padded} steps={} real_from={} dev_steps={} real_prove_s={:.1}",
+        run.step_no,
+        if dev_env { "never".to_owned() } else { real_from.to_string() },
+        if dev_env { run.step_no } else { real_from.saturating_sub(1).min(run.step_no) },
+        run.real_prove_s
+    );
     println!("all settlement checks passed");
     Ok(())
 }

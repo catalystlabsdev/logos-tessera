@@ -1,4 +1,5 @@
-//! Private posture: one zero-time-lock `QueueAndExecute` proved inside LEZ's privacy-preserving
+//! Proof-only check of the private posture (superseded for evidence by `settle`, which also
+//! settles): one zero-time-lock `QueueAndExecute` proved inside LEZ's privacy-preserving
 //! circuit. The configuration and the vault are private PDAs of Tessera, bound to the group's
 //! keys; the payout goes to a public recipient. Prints proving time and proof size.
 //!
@@ -12,62 +13,21 @@ use std::{
 
 use anyhow::{Result, anyhow};
 use lee::{
-    ProvingInput, PublicExecutionContext, SenderPresentation, Simulation, error::LeeError,
-    execute_and_prove, privacy_preserving_transaction::circuit::ProgramCatalog,
+    ProvingInput, PublicExecutionContext, SenderPresentation, Simulation, execute_and_prove,
+    privacy_preserving_transaction::circuit::ProgramCatalog,
 };
 use lee_core::{
-    AuthorizationSecretKey, DUMMY_COMMITMENT_HASH, DummyInput, DummyOutput, EncryptedNote,
-    NullifierPublicKey, NullifierSecretKey, NullifierWitness, PrivateWitness, RecipientEncryption,
-    RootCall, SharedSecretKey, WitnessKind,
+    AuthorizationSecretKey, DUMMY_COMMITMENT_HASH, NullifierPublicKey, NullifierSecretKey, NullifierWitness,
+    PrivateWitness, RootCall, WitnessKind,
     account::{Account, AccountId, Actor, ActorState},
-    encryption::{Ciphertext, MlKem768EncapsulationKey, ViewingPublicKey},
+    encryption::ViewingPublicKey,
     execution_state::TransactionEntry,
     native_token::{self, NATIVE_TOKEN_PROGRAM_ID},
-    program::{MessageBody, PdaSeed},
+    program::PdaSeed,
 };
 use tessera_api::{Msg, State};
 use tessera_core::{AccountRef, Action, Call, Context, Proposal, fixtures};
-use tessera_host::{AMOUNT, VAULT_FUNDS, hex, program};
-
-fn sha(parts: &[&[u8]]) -> [u8; 32] {
-    use risc0_zkvm::sha::rust_crypto::{Digest, Sha256};
-    let mut h = Sha256::new();
-    for p in parts {
-        h.update(p);
-    }
-    h.finalize().into()
-}
-
-fn no_seal(body: &MessageBody) -> Result<RecipientEncryption, LeeError> {
-    Err(LeeError::InvalidInput(format!("no seal for async message to {:?}", body.to)))
-}
-
-/// A wallet pads every private transaction to 7 private actions and 512-byte notes, so that
-/// observers cannot count real accounts. Mirrors LEZ's own `cycle_bench` dummies.
-const PADDED_ACTIONS: usize = 7;
-const CIPHERTEXT_PAD: u32 = 512;
-
-fn dummy_inputs(count: usize, seed: u8) -> Vec<DummyInput> {
-    (0..count)
-        .map(|i| {
-            let tag = |k: u8| sha(&[b"tessera/dummy", &[seed, i as u8, k]]);
-            let ek = MlKem768EncapsulationKey::from_seed(&tag(1), &tag(2));
-            let (_, epk) = SharedSecretKey::encapsulate(&ek);
-            let mut ciphertext = vec![0u8; CIPHERTEXT_PAD as usize];
-            for (j, b) in ciphertext.iter_mut().enumerate() {
-                *b = tag(3)[j % 32] ^ (j as u8);
-            }
-            DummyInput {
-                nullifier_seed: tag(4),
-                commitment_root: DUMMY_COMMITMENT_HASH,
-                output: DummyOutput {
-                    commitment_seed: tag(5),
-                    note: EncryptedNote { ciphertext: Ciphertext::from_inner(ciphertext), epk },
-                },
-            }
-        })
-        .collect()
-}
+use tessera_host::{AMOUNT, CIPHERTEXT_PAD, PADDED_ACTIONS, VAULT_FUNDS, dummy_inputs, hex, no_seal, program, sha};
 
 fn main() -> Result<()> {
     let m: usize = std::env::args().nth(1).and_then(|a| a.parse().ok()).unwrap_or(5);
@@ -104,21 +64,20 @@ fn main() -> Result<()> {
     f.resign(proposal, m);
 
     let stored = State {
-        ctx: f.ctx.clone(),
+        ctx: f.ctx,
         config: f.config.clone(),
         vault_seed: *vault_seed.as_bytes(),
         vault_id: *vault_id.value(),
         queued: Vec::new(),
     };
-    let config_account =
-        Account::default().with_actor_state(program_acct, ActorState::from(borsh::to_vec(&stored)?));
+    let config_account = Account::default().with_actor_state(program_acct, ActorState::from(borsh::to_vec(&stored)?));
     let vault_account =
         Account::default().with_actor_state(NATIVE_TOKEN_PROGRAM_ID, native_token::encode_balance(VAULT_FUNDS));
 
     let witness = |account: Account, seed: PdaSeed| PrivateWitness {
         vpk: vpk.clone(),
         random_seed: sha(&[b"seed", seed.as_bytes()]),
-        kind: WitnessKind::Pda { nsk: nsk.clone(), binding: (program_acct, seed) },
+        kind: WitnessKind::Pda { nsk, binding: (program_acct, seed) },
         nullifier: NullifierWitness::Update { account, membership_proof: (0, Vec::new()) },
         address_openings: BTreeSet::new(),
     };
@@ -126,9 +85,9 @@ fn main() -> Result<()> {
     let msg = Msg::QueueAndExecute {
         proposal: f.proposal.clone(),
         signed_epoch: f.config.epoch,
-        proposer: f.proposer.clone(),
+        proposer: f.proposer,
         approvals: f.approvals.clone(),
-        executor: f.executor.clone(),
+        executor: f.executor,
         env: f.env.clone(),
     };
     let input = ProvingInput {
@@ -138,7 +97,7 @@ fn main() -> Result<()> {
         }),
         public_context: PublicExecutionContext::new(vec![Actor::native_balance(recipient)], HashSet::new()),
         private_witnesses: vec![witness(config_account, config_seed), witness(vault_account, vault_seed)],
-        dummy_inputs: if padded { dummy_inputs(PADDED_ACTIONS - 2, n as u8) } else { Vec::new() },
+        dummy_inputs: if padded { dummy_inputs(PADDED_ACTIONS - 2, DUMMY_COMMITMENT_HASH) } else { Vec::new() },
         ciphertext_padding: if padded { Some(CIPHERTEXT_PAD) } else { None },
         recoveries: Vec::new(),
         private_promotions: BTreeSet::new(),
@@ -163,9 +122,18 @@ fn main() -> Result<()> {
             recoveries: Vec::new(),
             private_promotions: BTreeSet::new(),
         };
-        let r = execute_and_prove(steal, &Simulation::default(), &catalog, |_| SenderPresentation::Canonical, |_, _| false, no_seal);
+        let r = execute_and_prove(
+            steal,
+            &Simulation::default(),
+            &catalog,
+            |_| SenderPresentation::Canonical,
+            |_, _| false,
+            no_seal,
+        );
         match r {
-            Ok(_) => anyhow::bail!("group-key holder debited the private vault without Tessera: custody boundary FAILED"),
+            Ok(_) => {
+                anyhow::bail!("group-key holder debited the private vault without Tessera: custody boundary FAILED")
+            }
             Err(e) => {
                 let first: String = format!("{e:?}").chars().take(160).collect();
                 println!("ok  group_key_holder_cannot_debit_private_vault: refused ({first})");
@@ -175,10 +143,7 @@ fn main() -> Result<()> {
     }
 
     let dev = std::env::var("RISC0_DEV_MODE").unwrap_or_default();
-    println!(
-        "M = {m}, N = {n}, signatures checked = {}, padded = {padded}, RISC0_DEV_MODE={dev:?}",
-        m + 2
-    );
+    println!("M = {m}, N = {n}, signatures checked = {}, padded = {padded}, RISC0_DEV_MODE={dev:?}", m + 2);
     let started = Instant::now();
     let (output, proof) = execute_and_prove(
         input,
