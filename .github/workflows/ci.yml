@@ -17,7 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-        with: { components: clippy, rustfmt, targets: wasm32v1-none }
+        with: { components: "clippy, rustfmt", targets: wasm32v1-none }
       - uses: Swatinem/rust-cache@v2
         with: { workspaces: core }
       - run: cargo fmt --check
