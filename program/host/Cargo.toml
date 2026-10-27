@@ -14,6 +14,12 @@ risc0-zkvm.workspace = true
 borsh.workspace = true
 anyhow.workspace = true
 rand = { version = "0.8.5", features = ["std", "std_rng", "getrandom"] }
+# Talking to a running sequencer (settle_rpc): LEZ's own RPC client, transaction envelope and
+# program_loader messages, all at the same revision as `lee`.
+sequencer_service_rpc = { git = "https://github.com/logos-blockchain/logos-execution-zone", rev = "7e3f7f76", features = ["client"] }
+common = { git = "https://github.com/logos-blockchain/logos-execution-zone", rev = "7e3f7f76" }
+program_loader_core = { git = "https://github.com/logos-blockchain/logos-execution-zone", rev = "7e3f7f76" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 
 [features]
 default = []
