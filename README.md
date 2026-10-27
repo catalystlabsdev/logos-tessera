@@ -8,7 +8,9 @@ by Catalyst Labs. This repository is the prototype that accompanies our proposal
 authorisation rules, a guest program on LEZ 0.4's actor model, and a harness that drives the
 committed guest through LEZ's own state machine.
 
-Status: prototype, 25 October 2026 (public and private posture measured). Not audited. Do not hold real funds with it.
+Status: prototype, 27 October 2026 (public posture measured; private lifecycle proved with real
+receipts and settled through LEZ's state machine in process, and in dev mode on a running
+sequencer). Not audited. Do not hold real funds with it.
 
 ## What runs today
 
@@ -17,7 +19,7 @@ Status: prototype, 25 October 2026 (public and private posture measured). Not au
 | Authorisation rules (digests, BIP-340 approvals, roles, weights, epochs, time lock, cancel, R.2 re-check at execution) | [`core/`](core/) | 33 tests, `no_std` |
 | LEZ program on the actor model (`actor_entrypoint!`), paying from a program-derived vault | [`program/methods/guest/`](program/methods/guest/src/bin/tessera.rs) | builds against LEZ `7e3f7f76` |
 | Messages and stored state | [`program/api/`](program/api/src/lib.rs) | |
-| Gas measurement and on-chain refusal checks through `lee::V03State` | [`program/host/`](program/host/src/) | |
+| Gas measurement, refusal checks and the settled private lifecycle through `lee::V03State` (`settle`), and on a running sequencer (`settle_rpc`) | [`program/host/`](program/host/src/) | |
 
 ## Measured: a whole execute on LEZ 0.4, under the 10M cap
 
@@ -72,13 +74,13 @@ Real proving (`RISC0_DEV_MODE=0`, every proved step real), GCP `g2-standard-16` 
 NVIDIA L4 (driver 580), RISC Zero 3.0.5 CUDA prover, 27 October 2026, harness commit `5491369`,
 guest image ID `ea578ba9b8d70127f0acfb45a0a1d3edf67b53c4379789740262660fa6de5e64`:
 
-| run | M | N | padded | steps proved | execute proof (wall) | proof size | lifecycle proving | peak GPU memory |
+| run | M | N | padded | steps proved | execute proof (wall) | proof size | lifecycle proving | peak GPU memory (MiB) |
 |---|---:|---:|:-:|---:|---:|---:|---:|---:|
-| chain 2 + double-spend | 5 | 7 | yes | 8 | 19.7 s, 19.8 s | 235,740 B | 109.8 s | 11.4 GB |
-| double-spend | 5 | 7 | no | 6 | 19.2 s | 226,845 B | 68.5 s | 11.2 GB |
-| single execute | 1 | 7 | yes | 5 | 14.6 s | 235,612 B | 41.5 s | 11.3 GB |
-| single execute | 10 | 10 | yes | 5 | 25.6 s | 236,011 B | 62.8 s | 11.3 GB |
-| single execute | 32 | 32 | yes | 5 | 52.9 s | 237,529 B | 121.3 s | 11.4 GB |
+| chain 2 + double-spend | 5 | 7 | yes | 8 | 19.7 s, 19.8 s | 235,740 B | 109.8 s | 11,392 |
+| double-spend | 5 | 7 | no | 6 | 19.2 s | 226,845 B | 68.5 s | 11,244 |
+| single execute | 1 | 7 | yes | 5 | 14.6 s | 235,612 B | 41.5 s | 11,328 |
+| single execute | 10 | 10 | yes | 5 | 25.6 s | 236,011 B | 62.8 s | 11,328 |
+| single execute | 32 | 32 | yes | 5 | 52.9 s | 237,529 B | 121.3 s | 11,394 |
 
 "Padded" is the wallet's padding: 7 private actions per transaction and 512-byte notes, with
 the dummy inputs anchored at the live commitment root like a wallet would; on the L4 it costs
@@ -88,15 +90,16 @@ included, takes about 25 ms. Every run ends in `all settlement checks passed`; t
 samples and the queue log are in [`results/gpu-l4-settled/`](results/gpu-l4-settled/).
 
 The same execute on a **16-thread CPU, no GPU** (GCP `c3d-standard-16`, AMD EPYC 9B14, Zen 4,
-16 threads, 62 GB; RISC Zero CPU prover), settled the same way; steps 1 to 4 used dev-mode
+16 threads; RISC Zero CPU prover), settled the same way; steps 1 to 4 used dev-mode
 stubs so the machine pays only for the execute (`--real-from 5`, `dev_steps=4` in the log):
 
 | M | N | padded | execute proof (wall) | peak RSS | proof size | settle |
 |---:|---:|:-:|---:|---:|---:|---:|
-| 5 | 7 | no | 626.5 s | 9.6 GB | 226,845 B | 17 ms |
-| 5 | 7 | yes | 654.7 s | 9.6 GB | 235,740 B | 17 ms |
+| 5 | 7 | no | 626.5 s | 9,615,488 kB | 226,845 B | 17 ms |
+| 5 | 7 | yes | 654.7 s | 9,615,416 kB | 235,740 B | 17 ms |
 
-The 32× gap between the two machines is the GPU, not the circuit (identical proof bytes).
+The roughly 33× gap between the two machines is the GPU, not the circuit: same guest image
+ID, same proof size.
 Logs: [`results/cpu16-zen4-settled/`](results/cpu16-zen4-settled/).
 
 The proof-only numbers from 25 October (same circuit, placeholder membership proofs, not
@@ -130,7 +133,7 @@ seen`) and never appear in a block.
 ok  step 5 (execute 1): settled on the node inside the window; recipient holds 1000 (getAccountBalance)
 ok  step 5 (execute replay): accepted into the mempool as 2a5b0adc…, then dropped by the block builder
       node: ERROR sequencer_core] Transaction with hash 2a5b0adc… failed settlement: ... Commitment already seen
-RESULT settled private execute k=2 M=5 padded=false prove_wall_s=0.2 inclusion_ms=1793 tx_bytes=8107 private_actions=2 block=20
+RESULT settled private execute k=1 M=5 padded=false prove_wall_s=0.2 inclusion_ms=1724 tx_bytes=7583 private_actions=2 block=13
 ```
 
 This run is **dev mode only**: the node runs with `RISC0_DEV_MODE=1` and accepts fake receipts,
@@ -178,7 +181,14 @@ tag). The toolchain is pinned in `program/rust-toolchain.toml`.
 - Private queued records (today a queued proposal is executed in the same transaction by
   `QueueAndExecute`).
 - The coordination room on the Logos chat module, the registry, the module, CLI and mini-app.
-- Public transactions here carry no fee payer; the sequencer's fee path is not exercised.
+- Settlement with real receipts on a running sequencer, and on the public testnet once it runs
+  the actor-model code the program targets (the sequencer run here is dev mode; the in-process
+  run verifies real receipts).
+- The deposit sweep's proving cost, the full CPU curve, and a reproducible guest build (the
+  image ID differs by build host).
+- In `measure`, `checks` and `settle` public transactions carry no fee payer; the only fee path
+  exercised is the public `program_loader` deploy in the dev-mode sequencer run
+  (privacy-preserving transactions are fee-exempt at this commit).
 - The program does not yet check a target's image ID against the signed call.
 
 Related: the in-guest BIP-340 cost benchmark,

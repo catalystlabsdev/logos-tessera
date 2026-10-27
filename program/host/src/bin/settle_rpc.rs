@@ -6,14 +6,14 @@
 //! `getProofsAndRoot` for the membership proofs the next step's witnesses need).
 //!
 //!   0. deploy    — Tessera's guest ELF is written through `program_loader` (segments + header)
-//!     from deterministic keys, paid by the funder; skipped when already there.
+//!      from deterministic keys, paid by the funder; skipped when already there.
 //!   1. `Create`  — the configuration is born as a private PDA (Init witness).
 //!   2. `Activate`— the members confirm it (Update witness, proof from the chain).
 //!   3. fund      — the funder shields `VAULT_FUNDS` into the private vault PDA.
 //!   4. `QueueAndExecute` (×`--chain`) — first an out-of-window copy (the node must drop it),
-//!     then the real one (recipient credited), then a byte-identical resubmission, which the
-//!     node drops as `Commitment already seen` (its commitment-freshness check runs
-//!     before the nullifier check).
+//!      then the real one (recipient credited), then a byte-identical resubmission, which the
+//!      node drops as `Commitment already seen` (its commitment-freshness check runs
+//!      before the nullifier check).
 //!
 //! Validity windows are wall-clock: the sequencer stamps blocks with `Utc::now()` ms, so the
 //! fixture's `[1_000, 61_000)` window is replaced by one around now.
@@ -652,9 +652,9 @@ async fn main() -> Result<()> {
         let msg_with = |env: &TxEnv| Msg::QueueAndExecute {
             proposal: f.proposal.clone(),
             signed_epoch: f.config.epoch,
-            proposer: f.proposer.clone(),
+            proposer: f.proposer,
             approvals: f.approvals.clone(),
-            executor: f.executor.clone(),
+            executor: f.executor,
             env: env.clone(),
         };
         let pre = run.node.balance(recipient).await?;
