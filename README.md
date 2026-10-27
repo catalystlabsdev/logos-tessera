@@ -5,7 +5,7 @@
 A private-by-default M-of-N multisig for the Logos Execution Zone (LEZ), built for
 [Logos RFP-005](https://github.com/logos-co/rfp/blob/master/RFPs/RFP-005-multisig-and-coordination.md)
 by Catalyst Labs. This repository is the prototype that accompanies our proposal: the
-authorisation rules, a guest program on LEZ 0.4's actor model, and a harness that drives the
+authorisation rules, a guest program on LEZ's actor model (`dev` `7e3f7f76`), and a harness that drives the
 committed guest through LEZ's own state machine.
 
 Status: prototype, 27 October 2026 (public posture measured; private lifecycle proved with real
@@ -21,7 +21,7 @@ sequencer). Not audited. Do not hold real funds with it.
 | Messages and stored state | [`program/api/`](program/api/src/lib.rs) | |
 | Gas measurement, refusal checks and the settled private lifecycle through `lee::V03State` (`settle`), and on a running sequencer (`settle_rpc`) | [`program/host/`](program/host/src/) | |
 
-## Measured: a whole execute on LEZ 0.4, under the 10M cap
+## Measured: a whole execute on LEZ's actor model, under the 10M cap
 
 One zero-time-lock `QueueAndExecute` transaction: the program verifies the proposer, M approvals
 and the executor (M + 2 BIP-340 signatures, RISC Zero's accelerated `k256`), writes the executed
@@ -47,7 +47,7 @@ still fits in one transaction, and `tessera_core` caps a configuration at 32 mem
 
 `settle` runs Tessera's whole private lifecycle as privacy-preserving transactions and settles
 each one, in process, through LEZ's own state machine (`lee::V03State` at `dev` commit
-`7e3f7f76`, v0.3.0+135, the actor-model branch pending the testnet 0.4 tag). LEZ verifies each
+`7e3f7f76`, v0.3.0+135, the actor-model branch pending the 0.4 tag). LEZ verifies each
 RISC Zero receipt against the privacy circuit's image ID and the settled message before it
 applies any diff; the steps:
 
@@ -59,7 +59,8 @@ applies any diff; the steps:
    directly, without Tessera's seed grant; LEZ's native token refuses at execution, so no
    proof can exist for that transaction.
 5. `QueueAndExecute`, chained: M approvals verified in the guest, vault debited, an existing
-   public recipient credited; repeated from the new state.
+   public recipient credited (or, with `--private-recipient`, a fresh private account created
+   and credited); repeated from the new state.
 
 For every execute the harness also shows: refused outside its validity window
 (`OutOfValidityWindow`, a check LEZ makes before it verifies the receipt); settled inside it with the exact post-state commitments recorded and
@@ -107,6 +108,41 @@ settled) are kept in [`results/gpu-l4/`](results/gpu-l4/) and
 [`results/laptop-m4/`](results/laptop-m4/): on an Apple M4 laptop, CPU only, the M = 5
 execute proof took 720.6 s unpadded and 881.1 s padded.
 
+### Paying a fresh private recipient (`--private-recipient`)
+
+The same lifecycle with each payout going to a **new regular private account** created in the
+execute itself: the payee gives the payer its nullifier key and viewing public key, and an Init
+witness holding only `RegularKey::Nullifying` (the LEZ wallet's automatic credit to a private
+recipient it holds keys for) creates the account while the native-token credit is promoted into
+it. The payer cannot spend the funds; holding the nullifier key, it can recognise the payee's
+first spend of them. Three private actions unpadded (configuration update,
+vault update, recipient initialisation), seven padded. Per execute the harness checks that the
+payee does not exist before, that afterwards its commitment for exactly the payout is in the
+tree (and, as a negative control, the same account holding one unit more is not) and its
+initialisation nullifier is spent, and repeats the window and resubmission refusals (and, with `--double-spend`, the double
+spend, which pays a second fresh account).
+
+Real proving, 27 October 2026, commit `e7ae6d8`:
+
+| machine | M | N | padded | execute proof (wall) | proof size | settle |
+|---|---:|---:|:-:|---:|---:|---:|
+| NVIDIA L4 | 1 | 7 | no | 17.5 s | 227,822 B | 24 ms |
+| NVIDIA L4 | 5 | 7 | no | 22.5 s | 227,950 B | 25 ms |
+| NVIDIA L4 | 5 | 7 | yes (chain 2 + double-spend) | 23.2 s, 23.2 s | 235,516 B | 25 ms |
+| NVIDIA L4 | 10 | 10 | no | 28.5 s | 228,221 B | 24 ms |
+| NVIDIA L4 | 32 | 32 | yes | 56.2 s | 237,305 B | 25 ms |
+| 16-thread Zen 4 CPU | 1 | 7 | no | 600.6 s | 227,822 B | 17 ms |
+| 16-thread Zen 4 CPU | 5 | 7 | no | 756.1 s | 227,950 B | 17 ms |
+| 16-thread Zen 4 CPU | 10 | 10 | no | 933.3 s | 228,221 B | 17 ms |
+| 16-thread Zen 4 CPU | 5 | 7 | yes | 783.0 s | 235,516 B | 17 ms |
+
+On the L4 every step is real (`dev_steps=0`); on the CPU only the execute is (`--real-from 5`).
+Creating the recipient adds about 3 s on the L4 and about 2 minutes on the CPU at M = 5,
+against paying an existing public account. Not covered: a payee known only by its public keys,
+which LEZ pays with a sealed async message and a separate claim transaction. Logs:
+[`results/gpu-l4-private-recipient/`](results/gpu-l4-private-recipient/) and
+[`results/cpu16-zen4-private-recipient/`](results/cpu16-zen4-private-recipient/).
+
 Caveats, stated plainly:
 
 - The state machine is in process (`lee::V03State`), not the public testnet; the same
@@ -114,7 +150,8 @@ Caveats, stated plainly:
   fee-exempt in this LEZ commit, so no fee path is exercised for them.
 - The guest image ID differs between build hosts (macOS vs Linux) because it is not yet built in
   RISC Zero's reproducible Docker image.
-- Keys are synthetic fixtures; the recipient is an existing public account.
+- Keys are synthetic fixtures; the recipient is an existing public account, or with
+  `--private-recipient` a fresh private account whose nullifier key the payer holds.
 
 ## Settled on a running LEZ sequencer (dev mode)
 
@@ -168,6 +205,7 @@ RISC0_DEV_MODE=1 ./target/release/settle 5 --padded --chain 2 --double-spend   #
 # real private proving and settlement: on an NVIDIA machine
 cargo build --release -p tessera_host --features cuda
 RISC0_DEV_MODE=0 ./target/release/settle 5 --padded --chain 2 --double-spend
+RISC0_DEV_MODE=0 ./target/release/settle 5 --double-spend --private-recipient   # payout to a new private account
 # CPU only (slow): prove just the execute, dev-mode stubs for the steps before it
 cargo build --release -p tessera_host --features prove
 RISC0_DEV_MODE=0 ./target/release/settle 5 --real-from 5
@@ -184,7 +222,9 @@ tag). The toolchain is pinned in `program/rust-toolchain.toml`.
 - Settlement with real receipts on a running sequencer, and on the public testnet once it runs
   the actor-model code the program targets (the sequencer run here is dev mode; the in-process
   run verifies real receipts).
-- The deposit sweep's proving cost, the full CPU curve, and a reproducible guest build (the
+- A payout to a private recipient known only by its public keys (sealed async message plus
+  the recipient's claim).
+- The deposit sweep's proving cost, the padded CPU curve and the CPU curve beyond M = 10, and a reproducible guest build (the
   image ID differs by build host).
 - In `measure`, `checks` and `settle` public transactions carry no fee payer; the only fee path
   exercised is the public `program_loader` deploy in the dev-mode sequencer run

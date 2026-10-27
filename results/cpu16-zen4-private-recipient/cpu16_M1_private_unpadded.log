@@ -1,0 +1,52 @@
+tessera image id: ea578ba9b8d70127f0acfb45a0a1d3edf67b53c4379789740262660fa6de5e64
+M = 1, N = 7, signatures per execute = 3, padded = false, recipient = private, chain = 1, double_spend = false, real proving from step 5
+WARNING: proving in dev mode. This will not generate valid, secure proofs.
+WARNING: Proving in dev mode does not generate a valid receipt. Receipts generated from this process are invalid and should never be used in production.
+WARNING: proving in dev mode. This will not generate valid, secure proofs.
+WARNING: Proving in dev mode does not generate a valid receipt. Receipts generated from this process are invalid and should never be used in production.
+    step 1 (create): dev-mode stub (no proof) in 0.2 s, 1 private actions, receipt fake(dev-mode), 2001 B
+ok  step 1 (create): settled; inactive configuration committed
+WARNING: proving in dev mode. This will not generate valid, secure proofs.
+WARNING: Proving in dev mode does not generate a valid receipt. Receipts generated from this process are invalid and should never be used in production.
+WARNING: proving in dev mode. This will not generate valid, secure proofs.
+WARNING: Proving in dev mode does not generate a valid receipt. Receipts generated from this process are invalid and should never be used in production.
+    step 2 (activate): dev-mode stub (no proof) in 0.2 s, 1 private actions, receipt fake(dev-mode), 2001 B
+ok  step 2 (activate): settled; active configuration committed
+WARNING: proving in dev mode. This will not generate valid, secure proofs.
+WARNING: Proving in dev mode does not generate a valid receipt. Receipts generated from this process are invalid and should never be used in production.
+    step 3 (fund): dev-mode stub (no proof) in 0.1 s, 1 private actions, receipt fake(dev-mode), 1877 B
+ok  step 3 (fund): settled; funder debited to 0, private vault committed with 1000000
+ok  step 4 (group-key holder debits the live vault without Tessera's seed): no proof possible (InvalidProgramBehavior(NativeTransferFailed(UnauthorizedSender { account_id: AxBeDGhvEdxfptW95mWV7Xgw4FWdpEHwX)
+    step 5 (execute): proved in 600.6 s, 3 private actions, receipt succinct, 227822 B
+ok  step 5 (execute outside the validity window): refused (OutOfValidityWindow)
+ok  step 5 (execute 1): settled inside the window; new private recipient FPHePq9ybqNpGS5xiSFTAXbrn9ZbcvMcBM9cfq8szuTR created holding 1000 (commitment in the tree, init nullifier spent)
+ok  step 5 (execute 1): post-state commitments recorded (vault now 999000)
+ok  step 5 (execute 1): nullifiers of the spent configuration and vault pre-states recorded
+ok  step 5 (execute resubmitted unchanged): refused (InvalidInput("Commitment already seen"))
+RESULT settled private execute k=1 M=1 padded=false recipient=private real=true receipt=succinct prove_wall_s=600.6 proof_bytes=227822 tx_bytes=232517 settle_ms=17 private_actions=3
+RESULT lifecycle M=1 padded=false recipient=private steps=5 real_from=5 dev_steps=4 real_prove_s=600.6
+all settlement checks passed
+	Command being timed: "./target/release/settle 1 --private-recipient --real-from 5"
+	User time (seconds): 8675.18
+	System time (seconds): 30.05
+	Percent of CPU this job got: 1448%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 10:01.08
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 9607600
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 14887812
+	Voluntary context switches: 36040
+	Involuntary context switches: 26590
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 2440
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
+exit=0

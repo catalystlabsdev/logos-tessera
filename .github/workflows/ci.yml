@@ -50,6 +50,8 @@ jobs:
         run: RISC0_DEV_MODE=0 ./target/release/checks
       - name: Private lifecycle settled through LEZ's state machine (dev-mode receipts)
         run: RISC0_DEV_MODE=1 ./target/release/settle 5 --padded --chain 2 --double-spend
+      - name: Same lifecycle paying fresh private recipients (dev-mode receipts)
+        run: RISC0_DEV_MODE=1 ./target/release/settle 5 --padded --chain 2 --double-spend --private-recipient
       - name: Billed gas, M = 1..32
         run: RISC0_DEV_MODE=0 ./target/release/measure | tee gas-table.md
       - uses: actions/upload-artifact@v4

@@ -9,7 +9,8 @@
 //! 4. custody: a group-key holder's direct debit of the live vault, without Tessera's seed, is
 //!    refused by LEZ's native token inside the circuit (no proof can exist).
 //! 5. `QueueAndExecute`, `--chain` times: M approvals verified, vault debited, an existing
-//!    public recipient credited.
+//!    public recipient credited; with `--private-recipient`, a fresh regular private account
+//!    is created and credited in the same transaction instead (a third private action).
 //!
 //! For each execute the harness also shows: refused outside its proven validity window
 //! (`OutOfValidityWindow`), settled inside it with the exact post-state commitments recorded and
@@ -19,6 +20,7 @@
 //! names its receipt kind (succinct STARK, or fake for a dev-mode stub).
 //!
 //! Flags: `--padded` (wallet padding: 7 private actions, 512-byte notes), `--chain N`,
+//! `--private-recipient` (each payout goes to a new private account, see `PrivateRecipient`),
 //! `--double-spend`, `--real-from K` (steps before K use dev-mode stubs: executed on the real
 //! inputs and settled with every check except receipt verification, so a CPU run only pays for
 //! the execute; every RESULT line says whether its step was real).
@@ -37,7 +39,7 @@ use lee::{
 };
 use lee_core::{
     AuthorizationSecretKey, Commitment, Nullifier, NullifierPublicKey, NullifierSecretKey, NullifierWitness,
-    PrivateWitness, RootCall, WitnessKind,
+    PrivateWitness, RegularKey, RootCall, WitnessKind,
     account::{Account, AccountId, Actor, ActorState, Nonce},
     encryption::ViewingPublicKey,
     execution_state::TransactionEntry,
@@ -90,6 +92,33 @@ struct Proved {
     kind: &'static str,
 }
 
+/// A fresh regular private account that receives one payout. The payee gives the payer its
+/// nullifier key and its viewing public key, so the account can be created by the payout
+/// transaction itself with an Init witness holding `RegularKey::Nullifying` (the LEZ wallet's
+/// automatic credit to a private recipient it holds keys for). The payer cannot spend the funds.
+/// A recipient known only by its public keys is paid by a sealed async message and a separate
+/// claim transaction instead; that shape is not measured here.
+struct PrivateRecipient {
+    nsk: NullifierSecretKey,
+    vpk: ViewingPublicKey,
+    id: AccountId,
+}
+
+impl PrivateRecipient {
+    fn new(tag: u64) -> Self {
+        let t = tag.to_le_bytes();
+        let nsk = NullifierSecretKey::from(&AuthorizationSecretKey(sha(&[b"tessera/recipient/ask", &t])));
+        let vpk = ViewingPublicKey::from_seed(&sha(&[b"tessera/recipient/d", &t]), &sha(&[b"tessera/recipient/z", &t]));
+        let id = AccountId::for_regular_private_account(&NullifierPublicKey::from(&nsk), &vpk);
+        PrivateRecipient { nsk, vpk, id }
+    }
+
+    /// The account after it is created holding `amount` of the native token.
+    fn credited(&self, amount: u128) -> Account {
+        bump(&Account::default(), &self.nsk, NATIVE_TOKEN_PROGRAM_ID, native_token::encode_balance(amount))
+    }
+}
+
 struct Run {
     state: V03State,
     catalog: ProgramCatalog,
@@ -134,6 +163,17 @@ impl Run {
 
     fn init(&self, seed: PdaSeed) -> PrivateWitness {
         self.pda_witness(seed, NullifierWitness::Init { commitment_root: self.state.commitment_root() })
+    }
+
+    /// Init witness creating `r`'s account at the live root, holding only its nullifier key.
+    fn recipient_init(&self, r: &PrivateRecipient) -> PrivateWitness {
+        PrivateWitness {
+            vpk: r.vpk.clone(),
+            random_seed: sha(&[b"seed/recipient", r.id.value(), &[self.step_no as u8]]),
+            kind: WitnessKind::Regular(RegularKey::Nullifying(r.nsk)),
+            nullifier: NullifierWitness::Init { commitment_root: self.state.commitment_root() },
+            address_openings: BTreeSet::new(),
+        }
     }
 
     fn prove(&mut self, label: &str, step: Step) -> Result<Proved> {
@@ -340,6 +380,8 @@ fn main() -> Result<()> {
     };
     let padded = args.iter().any(|a| a == "--padded");
     let double_spend = args.iter().any(|a| a == "--double-spend");
+    let private_recipient = args.iter().any(|a| a == "--private-recipient");
+    let recipient_kind = if private_recipient { "private" } else { "public" };
     let chain = flag("--chain").unwrap_or(1);
     let dev_env = std::env::var("RISC0_DEV_MODE").unwrap_or_default() == "1";
     let real_from = if dev_env { usize::MAX } else { flag("--real-from").unwrap_or(1) };
@@ -349,7 +391,7 @@ fn main() -> Result<()> {
     let program_acct = AccountId::from_builtin_program(program.id());
     println!("tessera image id: {}", hex(&program.id()));
     println!(
-        "M = {m}, N = {n}, signatures per execute = {}, padded = {padded}, chain = {chain}, double_spend = {double_spend}, real proving from step {}",
+        "M = {m}, N = {n}, signatures per execute = {}, padded = {padded}, recipient = {recipient_kind}, chain = {chain}, double_spend = {double_spend}, real proving from step {}",
         m + 2,
         if dev_env { "never (RISC0_DEV_MODE=1)".to_owned() } else { real_from.to_string() }
     );
@@ -485,31 +527,68 @@ fn main() -> Result<()> {
     // 5.. Execute, `chain` times.
     for k in 1..=chain {
         let step = run.next_step();
-        f.resign(payout_proposal(k as u64, vault_id, recipient, AMOUNT)?, m);
+        let payee = private_recipient.then(|| PrivateRecipient::new(k as u64));
+        let payee_id = payee.as_ref().map_or(recipient, |r| r.id);
+        f.resign(payout_proposal(k as u64, vault_id, payee_id, AMOUNT)?, m);
         let msg = execute_msg(&f);
         let pre = run.balance(recipient)?;
         let stale_config = config_account.clone();
         let stale_vault = vault_account.clone();
+        let mut witnesses = vec![
+            run.update(config_seed, config_id, &config_account)?,
+            run.update(vault_seed, vault_id, &vault_account)?,
+        ];
+        if let Some(r) = &payee {
+            // The account must not exist yet, so the execute below is what creates it.
+            ensure!(
+                !run.state.is_spent(&Nullifier::for_account_initialization(&r.id, &r.nsk)),
+                "execute {k}: the private recipient already exists before the payout"
+            );
+            witnesses.push(run.recipient_init(r));
+        }
         let p = run.prove(
             "execute",
             Step {
                 root: RootCall { to: config_actor, message: borsh::to_vec(&msg)? },
-                public_actors: vec![recipient_actor],
+                public_actors: if private_recipient { Vec::new() } else { vec![recipient_actor] },
                 signers: &[],
-                public_states: vec![(recipient_actor, native_token::encode_balance(pre))],
-                witnesses: vec![
-                    run.update(config_seed, config_id, &config_account)?,
-                    run.update(vault_seed, vault_id, &vault_account)?,
-                ],
-                promote_to: None,
+                public_states: if private_recipient {
+                    Vec::new()
+                } else {
+                    vec![(recipient_actor, native_token::encode_balance(pre))]
+                },
+                witnesses,
+                promote_to: payee.as_ref().map(|r| r.id),
             },
         )?;
         let tx_bytes = borsh::to_vec(&p.tx)?.len();
         run.expect_refused("execute outside the validity window", &p.tx, OUTSIDE_MS, Refusal::OutsideWindow)?;
         let settle_ms = run.settle("execute", &p.tx, INSIDE_MS)?;
         let paid = run.balance(recipient)?;
-        ensure!(paid == AMOUNT * k as u128, "recipient holds {paid}, expected {}", AMOUNT * k as u128);
-        println!("ok  step {step} (execute {k}): settled inside the window; recipient credited {paid}");
+        if let Some(r) = &payee {
+            ensure!(paid == pre, "a private payout changed the public recipient's balance");
+            ensure!(
+                run.state.get_proof_for_commitment(&Commitment::new(&r.id, &r.credited(AMOUNT))).is_some(),
+                "execute {k}: the private recipient's account holding {AMOUNT} is not in the tree"
+            );
+            // Negative control: the same account with any other balance is not in the tree, so the
+            // check above pins the amount rather than passing for any commitment.
+            ensure!(
+                run.state.get_proof_for_commitment(&Commitment::new(&r.id, &r.credited(AMOUNT + 1))).is_none(),
+                "execute {k}: commitment lookup does not distinguish balances"
+            );
+            ensure!(
+                run.state.is_spent(&Nullifier::for_account_initialization(&r.id, &r.nsk)),
+                "execute {k}: the private recipient's init nullifier is not recorded"
+            );
+            println!(
+                "ok  step {step} (execute {k}): settled inside the window; new private recipient {} created holding {AMOUNT} (commitment in the tree, init nullifier spent)",
+                r.id
+            );
+        } else {
+            ensure!(paid == AMOUNT * k as u128, "recipient holds {paid}, expected {}", AMOUNT * k as u128);
+            println!("ok  step {step} (execute {k}): settled inside the window; recipient credited {paid}");
+        }
 
         let executed = tessera_core::queue_and_execute(
             &f.ctx,
@@ -545,7 +624,7 @@ fn main() -> Result<()> {
         println!("ok  step {step} (execute {k}): nullifiers of the spent configuration and vault pre-states recorded");
         run.expect_refused("execute resubmitted unchanged", &p.tx, INSIDE_MS + 500, Refusal::DuplicateCommitments)?;
         println!(
-            "RESULT settled private execute k={k} M={m} padded={padded} real={} receipt={} prove_wall_s={:.1} proof_bytes={} tx_bytes={tx_bytes} settle_ms={settle_ms:.0} private_actions={}",
+            "RESULT settled private execute k={k} M={m} padded={padded} recipient={recipient_kind} real={} receipt={} prove_wall_s={:.1} proof_bytes={} tx_bytes={tx_bytes} settle_ms={settle_ms:.0} private_actions={}",
             p.real, p.kind, p.secs, p.proof_bytes, p.actions
         );
 
@@ -554,20 +633,32 @@ fn main() -> Result<()> {
             // coincide with execute k's) proved against the pre-state execute k already spent.
             let ds = run.next_step();
             let mut g = f.clone();
-            g.resign(payout_proposal(100 + k as u64, vault_id, recipient, AMOUNT * 2)?, m);
+            let thief = private_recipient.then(|| PrivateRecipient::new(100 + k as u64));
+            g.resign(
+                payout_proposal(100 + k as u64, vault_id, thief.as_ref().map_or(recipient, |r| r.id), AMOUNT * 2)?,
+                m,
+            );
             let msg = execute_msg(&g);
+            let mut witnesses = vec![
+                run.update(config_seed, config_id, &stale_config)?,
+                run.update(vault_seed, vault_id, &stale_vault)?,
+            ];
+            if let Some(r) = &thief {
+                witnesses.push(run.recipient_init(r));
+            }
             let p2 = run.prove(
                 "double-spend attempt",
                 Step {
                     root: RootCall { to: config_actor, message: borsh::to_vec(&msg)? },
-                    public_actors: vec![recipient_actor],
+                    public_actors: if private_recipient { Vec::new() } else { vec![recipient_actor] },
                     signers: &[],
-                    public_states: vec![(recipient_actor, native_token::encode_balance(paid))],
-                    witnesses: vec![
-                        run.update(config_seed, config_id, &stale_config)?,
-                        run.update(vault_seed, vault_id, &stale_vault)?,
-                    ],
-                    promote_to: None,
+                    public_states: if private_recipient {
+                        Vec::new()
+                    } else {
+                        vec![(recipient_actor, native_token::encode_balance(paid))]
+                    },
+                    witnesses,
+                    promote_to: thief.as_ref().map(|r| r.id),
                 },
             )?;
             run.expect_refused(
@@ -576,6 +667,7 @@ fn main() -> Result<()> {
                 INSIDE_MS + 900,
                 Refusal::NullifierSpent,
             )?;
+            // Sanity only: a refused transaction is applied to a scratch copy, never to `run.state`.
             ensure!(run.balance(recipient)? == paid, "double spend changed the recipient's balance");
             println!(
                 "RESULT double-spend k={k} M={m} real={} receipt={} refused=NullifierSpent step={ds}",
@@ -584,7 +676,7 @@ fn main() -> Result<()> {
         }
     }
     println!(
-        "RESULT lifecycle M={m} padded={padded} steps={} real_from={} dev_steps={} real_prove_s={:.1}",
+        "RESULT lifecycle M={m} padded={padded} recipient={recipient_kind} steps={} real_from={} dev_steps={} real_prove_s={:.1}",
         run.step_no,
         if dev_env { "never".to_owned() } else { real_from.to_string() },
         if dev_env { run.step_no } else { real_from.saturating_sub(1).min(run.step_no) },
