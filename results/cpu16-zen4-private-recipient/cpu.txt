@@ -1,0 +1,5 @@
+CPU(s):                                  16
+Model name:                              AMD EPYC 9B14
+Thread(s) per core:                      2
+               total        used        free      shared  buff/cache   available
+Mem:              62           0          46           0          15          61
