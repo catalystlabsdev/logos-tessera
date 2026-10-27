@@ -1,0 +1,42 @@
+tessera image id: ea578ba9b8d70127f0acfb45a0a1d3edf67b53c4379789740262660fa6de5e64
+M = 32, N = 32, signatures per execute = 34, padded = true, chain = 1, double_spend = false, real proving from step 1
+    step 1 (create): proved in 13.0 s, 7 private actions, receipt succinct, 236163 B
+ok  step 1 (create): settled; inactive configuration committed
+    step 2 (activate): proved in 48.7 s, 7 private actions, receipt succinct, 236163 B
+ok  step 2 (activate): settled; active configuration committed
+    step 3 (fund): proved in 6.7 s, 7 private actions, receipt succinct, 235489 B
+ok  step 3 (fund): settled; funder debited to 0, private vault committed with 1000000
+ok  step 4 (group-key holder debits the live vault without Tessera's seed): no proof possible (InvalidProgramBehavior(NativeTransferFailed(UnauthorizedSender { account_id: 43CC1hJMzxBGx8LocghiaXquiPLokVdq7)
+    step 5 (execute): proved in 52.9 s, 7 private actions, receipt succinct, 237529 B
+ok  step 5 (execute outside the validity window): refused (OutOfValidityWindow)
+ok  step 5 (execute 1): settled inside the window; recipient credited 1000
+ok  step 5 (execute 1): post-state commitments recorded (vault now 999000)
+ok  step 5 (execute 1): nullifiers of the spent configuration and vault pre-states recorded
+ok  step 5 (execute resubmitted unchanged): refused (InvalidInput("Commitment already seen"))
+RESULT settled private execute k=1 M=32 padded=true real=true receipt=succinct prove_wall_s=52.9 proof_bytes=237529 tx_bytes=251931 settle_ms=25 private_actions=7
+RESULT lifecycle M=32 padded=true steps=5 real_from=1 dev_steps=0 real_prove_s=121.3
+all settlement checks passed
+	Command being timed: "./target/release/settle 32 --padded --real-from 1"
+	User time (seconds): 109.42
+	System time (seconds): 12.37
+	Percent of CPU this job got: 100%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 2:01.59
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 867444
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 330
+	Minor (reclaiming a frame) page faults: 4052859
+	Voluntary context switches: 1402
+	Involuntary context switches: 991
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 10000
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
+exit=0

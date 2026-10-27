@@ -1,0 +1,3 @@
+NVIDIA L4, 580.178.04, 23034 MiB
+CPU(s):                                  16
+Model name:                              Intel(R) Xeon(R) CPU @ 2.20GHz
