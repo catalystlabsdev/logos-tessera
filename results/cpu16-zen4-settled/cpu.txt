@@ -1,0 +1,4 @@
+CPU(s):                                  16
+Model name:                              AMD EPYC 9B14
+Thread(s) per core:                      2
+Flags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext 

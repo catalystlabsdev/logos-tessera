@@ -1,0 +1,126 @@
+5491369 settle: full private lifecycle on LEZ's state machine with receipt kinds, nullifier and custody checks
+=== build gpu settle 05:12:01
+   Compiling tessera_host v0.1.0 (/home/xenowits/logos-tessera/program/host)
+    Finished `release` profile [optimized + debuginfo] target(s) in 6.14s
+=== gpu_M5_padded_chain2_ds: settle 5 --padded --chain 2 --double-spend --real-from 1  05:12:07
+    step 1 (create): proved in 9.4 s, 7 private actions, receipt succinct, 235238 B
+ok  step 1 (create): settled; inactive configuration committed
+    step 2 (activate): proved in 14.7 s, 7 private actions, receipt succinct, 235238 B
+ok  step 2 (activate): settled; active configuration committed
+    step 3 (fund): proved in 6.6 s, 7 private actions, receipt succinct, 235489 B
+ok  step 3 (fund): settled; funder debited to 0, private vault committed with 1000000
+ok  step 4 (group-key holder debits the live vault without Tessera's seed): no proof possible (InvalidProgramBehavior(NativeTransferFailed(UnauthorizedSender { account_id: AxBeDGhvEdxfptW95mWV7Xgw4FWdpEHwX)
+    step 5 (execute): proved in 19.7 s, 7 private actions, receipt succinct, 235740 B
+ok  step 5 (execute outside the validity window): refused (OutOfValidityWindow)
+ok  step 5 (execute 1): settled inside the window; recipient credited 1000
+ok  step 5 (execute 1): post-state commitments recorded (vault now 999000)
+ok  step 5 (execute 1): nullifiers of the spent configuration and vault pre-states recorded
+ok  step 5 (execute resubmitted unchanged): refused (InvalidInput("Commitment already seen"))
+RESULT settled private execute k=1 M=5 padded=true real=true receipt=succinct prove_wall_s=19.7 proof_bytes=235740 tx_bytes=248353 settle_ms=24 private_actions=7
+    step 6 (double-spend attempt): proved in 19.8 s, 7 private actions, receipt succinct, 235740 B
+ok  step 6 (double spend of the executed pre-state): refused (InvalidInput("Nullifier already seen"))
+RESULT double-spend k=1 M=5 real=true receipt=succinct refused=NullifierSpent step=6
+    step 7 (execute): proved in 19.8 s, 7 private actions, receipt succinct, 236002 B
+ok  step 7 (execute outside the validity window): refused (OutOfValidityWindow)
+ok  step 7 (execute 2): settled inside the window; recipient credited 2000
+ok  step 7 (execute 2): post-state commitments recorded (vault now 998000)
+ok  step 7 (execute 2): nullifiers of the spent configuration and vault pre-states recorded
+ok  step 7 (execute resubmitted unchanged): refused (InvalidInput("Commitment already seen"))
+RESULT settled private execute k=2 M=5 padded=true real=true receipt=succinct prove_wall_s=19.8 proof_bytes=236002 tx_bytes=248877 settle_ms=25 private_actions=7
+    step 8 (double-spend attempt): proved in 19.8 s, 7 private actions, receipt succinct, 236002 B
+ok  step 8 (double spend of the executed pre-state): refused (InvalidInput("Nullifier already seen"))
+RESULT double-spend k=2 M=5 real=true receipt=succinct refused=NullifierSpent step=8
+RESULT lifecycle M=5 padded=true steps=8 real_from=1 dev_steps=0 real_prove_s=109.8
+all settlement checks passed
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 1:50.22
+	Maximum resident set size (kbytes): 871448
+exit=0
+gpu peak: 100 %, 11392 MiB
+=== gpu_M5_unpadded_ds: settle 5 --double-spend --real-from 1  05:13:57
+    step 1 (create): proved in 9.3 s, 1 private actions, receipt succinct, 225014 B
+ok  step 1 (create): settled; inactive configuration committed
+    step 2 (activate): proved in 14.3 s, 1 private actions, receipt succinct, 225014 B
+ok  step 2 (activate): settled; active configuration committed
+    step 3 (fund): proved in 6.3 s, 1 private actions, receipt succinct, 224890 B
+ok  step 3 (fund): settled; funder debited to 0, private vault committed with 1000000
+ok  step 4 (group-key holder debits the live vault without Tessera's seed): no proof possible (InvalidProgramBehavior(NativeTransferFailed(UnauthorizedSender { account_id: AxBeDGhvEdxfptW95mWV7Xgw4FWdpEHwX)
+    step 5 (execute): proved in 19.2 s, 2 private actions, receipt succinct, 226845 B
+ok  step 5 (execute outside the validity window): refused (OutOfValidityWindow)
+ok  step 5 (execute 1): settled inside the window; recipient credited 1000
+ok  step 5 (execute 1): post-state commitments recorded (vault now 999000)
+ok  step 5 (execute 1): nullifiers of the spent configuration and vault pre-states recorded
+ok  step 5 (execute resubmitted unchanged): refused (InvalidInput("Commitment already seen"))
+RESULT settled private execute k=1 M=5 padded=false real=true receipt=succinct prove_wall_s=19.2 proof_bytes=226845 tx_bytes=230563 settle_ms=24 private_actions=2
+    step 6 (double-spend attempt): proved in 19.4 s, 2 private actions, receipt succinct, 226845 B
+ok  step 6 (double spend of the executed pre-state): refused (InvalidInput("Nullifier already seen"))
+RESULT double-spend k=1 M=5 real=true receipt=succinct refused=NullifierSpent step=6
+RESULT lifecycle M=5 padded=false steps=6 real_from=1 dev_steps=0 real_prove_s=68.5
+all settlement checks passed
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 1:08.77
+	Maximum resident set size (kbytes): 869136
+exit=0
+gpu peak: 100 %, 11244 MiB
+=== gpu_M1_padded: settle 1 --padded --real-from 1  05:15:06
+    step 1 (create): proved in 9.5 s, 7 private actions, receipt succinct, 235238 B
+ok  step 1 (create): settled; inactive configuration committed
+    step 2 (activate): proved in 10.7 s, 7 private actions, receipt succinct, 235238 B
+ok  step 2 (activate): settled; active configuration committed
+    step 3 (fund): proved in 6.7 s, 7 private actions, receipt succinct, 235489 B
+ok  step 3 (fund): settled; funder debited to 0, private vault committed with 1000000
+ok  step 4 (group-key holder debits the live vault without Tessera's seed): no proof possible (InvalidProgramBehavior(NativeTransferFailed(UnauthorizedSender { account_id: AxBeDGhvEdxfptW95mWV7Xgw4FWdpEHwX)
+    step 5 (execute): proved in 14.6 s, 7 private actions, receipt succinct, 235612 B
+ok  step 5 (execute outside the validity window): refused (OutOfValidityWindow)
+ok  step 5 (execute 1): settled inside the window; recipient credited 1000
+ok  step 5 (execute 1): post-state commitments recorded (vault now 999000)
+ok  step 5 (execute 1): nullifiers of the spent configuration and vault pre-states recorded
+ok  step 5 (execute resubmitted unchanged): refused (InvalidInput("Commitment already seen"))
+RESULT settled private execute k=1 M=1 padded=true real=true receipt=succinct prove_wall_s=14.6 proof_bytes=235612 tx_bytes=248097 settle_ms=24 private_actions=7
+RESULT lifecycle M=1 padded=true steps=5 real_from=1 dev_steps=0 real_prove_s=41.5
+all settlement checks passed
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:41.80
+	Maximum resident set size (kbytes): 850460
+exit=0
+gpu peak: 100 %, 11328 MiB
+=== gpu_M10_padded: settle 10 --padded --real-from 1  05:15:48
+    step 1 (create): proved in 9.6 s, 7 private actions, receipt succinct, 235349 B
+ok  step 1 (create): settled; inactive configuration committed
+    step 2 (activate): proved in 21.0 s, 7 private actions, receipt succinct, 235349 B
+ok  step 2 (activate): settled; active configuration committed
+    step 3 (fund): proved in 6.6 s, 7 private actions, receipt succinct, 235489 B
+ok  step 3 (fund): settled; funder debited to 0, private vault committed with 1000000
+ok  step 4 (group-key holder debits the live vault without Tessera's seed): no proof possible (InvalidProgramBehavior(NativeTransferFailed(UnauthorizedSender { account_id: 5rxtZwgbxkMox4hmV8JQwSif8EHNTE2G2)
+    step 5 (execute): proved in 25.6 s, 7 private actions, receipt succinct, 236011 B
+ok  step 5 (execute outside the validity window): refused (OutOfValidityWindow)
+ok  step 5 (execute 1): settled inside the window; recipient credited 1000
+ok  step 5 (execute 1): post-state commitments recorded (vault now 999000)
+ok  step 5 (execute 1): nullifiers of the spent configuration and vault pre-states recorded
+ok  step 5 (execute resubmitted unchanged): refused (InvalidInput("Commitment already seen"))
+RESULT settled private execute k=1 M=10 padded=true real=true receipt=succinct prove_wall_s=25.6 proof_bytes=236011 tx_bytes=248895 settle_ms=24 private_actions=7
+RESULT lifecycle M=10 padded=true steps=5 real_from=1 dev_steps=0 real_prove_s=62.8
+all settlement checks passed
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 1:03.11
+	Maximum resident set size (kbytes): 868936
+exit=0
+gpu peak: 100 %, 11328 MiB
+=== gpu_M32_padded: settle 32 --padded --real-from 1  05:16:51
+    step 1 (create): proved in 13.0 s, 7 private actions, receipt succinct, 236163 B
+ok  step 1 (create): settled; inactive configuration committed
+    step 2 (activate): proved in 48.7 s, 7 private actions, receipt succinct, 236163 B
+ok  step 2 (activate): settled; active configuration committed
+    step 3 (fund): proved in 6.7 s, 7 private actions, receipt succinct, 235489 B
+ok  step 3 (fund): settled; funder debited to 0, private vault committed with 1000000
+ok  step 4 (group-key holder debits the live vault without Tessera's seed): no proof possible (InvalidProgramBehavior(NativeTransferFailed(UnauthorizedSender { account_id: 43CC1hJMzxBGx8LocghiaXquiPLokVdq7)
+    step 5 (execute): proved in 52.9 s, 7 private actions, receipt succinct, 237529 B
+ok  step 5 (execute outside the validity window): refused (OutOfValidityWindow)
+ok  step 5 (execute 1): settled inside the window; recipient credited 1000
+ok  step 5 (execute 1): post-state commitments recorded (vault now 999000)
+ok  step 5 (execute 1): nullifiers of the spent configuration and vault pre-states recorded
+ok  step 5 (execute resubmitted unchanged): refused (InvalidInput("Commitment already seen"))
+RESULT settled private execute k=1 M=32 padded=true real=true receipt=succinct prove_wall_s=52.9 proof_bytes=237529 tx_bytes=251931 settle_ms=25 private_actions=7
+RESULT lifecycle M=32 padded=true steps=5 real_from=1 dev_steps=0 real_prove_s=121.3
+all settlement checks passed
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 2:01.59
+	Maximum resident set size (kbytes): 867444
+exit=0
+gpu peak: 99 %, 11394 MiB
+ALL_DONE

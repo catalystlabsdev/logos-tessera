@@ -32,7 +32,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
-        with: { toolchain: "1.98.1" }
+        with: { toolchain: "1.98.1", components: "clippy, rustfmt" }
       - uses: Swatinem/rust-cache@v2
         with: { workspaces: program }
       - name: Install RISC Zero ${{ env.RISC0_VERSION }}
@@ -42,9 +42,14 @@ jobs:
           "$HOME/.risc0/bin/rzup" install cargo-risczero "$RISC0_VERSION"
           "$HOME/.risc0/bin/rzup" install r0vm "$RISC0_VERSION"
           "$HOME/.risc0/bin/rzup" install rust
+      - run: cargo fmt --check
       - run: cargo build --release -p tessera_host
+      - name: Lint the host (the guest is built above; clippy must not rebuild it)
+        run: RISC0_SKIP_BUILD=1 cargo clippy --release -p tessera_host --all-targets -- -D warnings
       - name: Refusal checks through LEZ's state machine
         run: RISC0_DEV_MODE=0 ./target/release/checks
+      - name: Private lifecycle settled through LEZ's state machine (dev-mode receipts)
+        run: RISC0_DEV_MODE=1 ./target/release/settle 5 --padded --chain 2 --double-spend
       - name: Billed gas, M = 1..32
         run: RISC0_DEV_MODE=0 ./target/release/measure | tee gas-table.md
       - uses: actions/upload-artifact@v4

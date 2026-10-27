@@ -20,7 +20,9 @@ fn main() -> Result<()> {
 
     // 1. Below threshold: 5-of-7 with only 4 approvals.
     let mut w = World::new(&program, 7, 5)?;
-    if let Msg::QueueAndExecute { proposal, signed_epoch, proposer, mut approvals, executor, env } = w.queue_and_execute_msg() {
+    if let Msg::QueueAndExecute { proposal, signed_epoch, proposer, mut approvals, executor, env } =
+        w.queue_and_execute_msg()
+    {
         approvals.truncate(4);
         let msg = Msg::QueueAndExecute { proposal, signed_epoch, proposer, approvals, executor, env };
         let tx = w.tx(w.config_actor(), &msg)?;

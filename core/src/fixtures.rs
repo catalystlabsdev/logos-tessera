@@ -98,6 +98,7 @@ pub fn transfer_call(vault: [u8; 32], recipient: [u8; 32], amount: u128) -> Call
 }
 
 /// Everything needed to exercise `queue`/`execute`.
+#[derive(Clone)]
 pub struct Fixture {
     pub ctx: Context,
     pub config: Config,

@@ -1,0 +1,55 @@
+tessera image id: ea578ba9b8d70127f0acfb45a0a1d3edf67b53c4379789740262660fa6de5e64
+M = 5, N = 7, signatures per execute = 7, padded = true, chain = 2, double_spend = true, real proving from step 1
+    step 1 (create): proved in 9.4 s, 7 private actions, receipt succinct, 235238 B
+ok  step 1 (create): settled; inactive configuration committed
+    step 2 (activate): proved in 14.7 s, 7 private actions, receipt succinct, 235238 B
+ok  step 2 (activate): settled; active configuration committed
+    step 3 (fund): proved in 6.6 s, 7 private actions, receipt succinct, 235489 B
+ok  step 3 (fund): settled; funder debited to 0, private vault committed with 1000000
+ok  step 4 (group-key holder debits the live vault without Tessera's seed): no proof possible (InvalidProgramBehavior(NativeTransferFailed(UnauthorizedSender { account_id: AxBeDGhvEdxfptW95mWV7Xgw4FWdpEHwX)
+    step 5 (execute): proved in 19.7 s, 7 private actions, receipt succinct, 235740 B
+ok  step 5 (execute outside the validity window): refused (OutOfValidityWindow)
+ok  step 5 (execute 1): settled inside the window; recipient credited 1000
+ok  step 5 (execute 1): post-state commitments recorded (vault now 999000)
+ok  step 5 (execute 1): nullifiers of the spent configuration and vault pre-states recorded
+ok  step 5 (execute resubmitted unchanged): refused (InvalidInput("Commitment already seen"))
+RESULT settled private execute k=1 M=5 padded=true real=true receipt=succinct prove_wall_s=19.7 proof_bytes=235740 tx_bytes=248353 settle_ms=24 private_actions=7
+    step 6 (double-spend attempt): proved in 19.8 s, 7 private actions, receipt succinct, 235740 B
+ok  step 6 (double spend of the executed pre-state): refused (InvalidInput("Nullifier already seen"))
+RESULT double-spend k=1 M=5 real=true receipt=succinct refused=NullifierSpent step=6
+    step 7 (execute): proved in 19.8 s, 7 private actions, receipt succinct, 236002 B
+ok  step 7 (execute outside the validity window): refused (OutOfValidityWindow)
+ok  step 7 (execute 2): settled inside the window; recipient credited 2000
+ok  step 7 (execute 2): post-state commitments recorded (vault now 998000)
+ok  step 7 (execute 2): nullifiers of the spent configuration and vault pre-states recorded
+ok  step 7 (execute resubmitted unchanged): refused (InvalidInput("Commitment already seen"))
+RESULT settled private execute k=2 M=5 padded=true real=true receipt=succinct prove_wall_s=19.8 proof_bytes=236002 tx_bytes=248877 settle_ms=25 private_actions=7
+    step 8 (double-spend attempt): proved in 19.8 s, 7 private actions, receipt succinct, 236002 B
+ok  step 8 (double spend of the executed pre-state): refused (InvalidInput("Nullifier already seen"))
+RESULT double-spend k=2 M=5 real=true receipt=succinct refused=NullifierSpent step=8
+RESULT lifecycle M=5 padded=true steps=8 real_from=1 dev_steps=0 real_prove_s=109.8
+all settlement checks passed
+	Command being timed: "./target/release/settle 5 --padded --chain 2 --double-spend --real-from 1"
+	User time (seconds): 100.30
+	System time (seconds): 10.15
+	Percent of CPU this job got: 100%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 1:50.22
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 871448
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 365
+	Minor (reclaiming a frame) page faults: 2876741
+	Voluntary context switches: 1293
+	Involuntary context switches: 1061
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 14440
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
+exit=0
